@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm -v)",
+      "Bash(npx -y @angular/cli@latest version)",
+      "Bash(where cloudflared *)",
+      "Bash(cloudflared --version)",
+      "Bash(npx -y @angular/cli@19 new frontend --style=css --routing=false --ssr=false --skip-git --package-manager=npm)",
+      "Bash(npm install *)",
+      "Bash(npx ng *)",
+      "Bash(npm start *)",
+      "Bash(curl -s http://localhost:3000/api/tunnel/status)",
+      "Bash(curl -s -X POST http://localhost:3000/api/tunnel/start -H 'Content-Type: application/json' -d '{\"localUrl\":\"https://localhost:4443\"}')",
+      "Bash(taskkill //PID 3784 //F)",
+      "Read(//c/Users/BENJIE~1/AppData/Local/Temp/claude/d--Don-Formbird-Works-github-projects-local-to-live-url/f7fee539-f3ee-486d-a099-53dd153a438d/scratchpad/fake-cloudflared/**)",
+      "Read(//c/Users/benjiePenol/AppData/Local/Temp/claude/d--Don-Formbird-Works-github-projects-local-to-live-url/f7fee539-f3ee-486d-a099-53dd153a438d/scratchpad/fake-cloudflared/**)",
+      "Bash(node -e ' *)",
+      "Bash(curl -s -X POST http://localhost:3000/api/tunnel/stop)",
+      "Bash(curl -s http://localhost:4200/api/tunnel/status)",
+      "Bash(curl -s http://localhost:4200/)",
+      "Bash(taskkill //PID 18188 //F)",
+      "Bash(taskkill //PID 25876 //F)",
+      "Bash(where winget *)",
+      "Bash(where choco *)",
+      "Bash(winget install *)"
+    ]
+  }
+}
