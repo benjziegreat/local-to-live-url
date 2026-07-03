@@ -53,18 +53,31 @@
     @if (state().publicUrl) {
       <section class="mt-6 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
         <h2 class="text-sm font-medium text-slate-700">Public URL</h2>
-        <div class="mt-3 flex flex-col gap-4 sm:flex-row sm:items-center">
+
+        <label for="publicUrlField" class="mt-3 block text-xs font-medium text-slate-500">
+          Tunnel link (append a path, e.g. /PMS, to point the QR code and link at it)
+        </label>
+        <input
+          id="publicUrlField"
+          type="text"
+          [ngModel]="publicUrlField()"
+          (ngModelChange)="onPublicUrlFieldChange($event)"
+          [ngModelOptions]="{ standalone: true }"
+          class="mt-1.5 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-mono shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+        />
+
+        <div class="mt-4 flex flex-col gap-4 sm:flex-row sm:items-center">
           @if (qrDataUrl()) {
             <img [src]="qrDataUrl()" alt="QR code for public tunnel URL" class="h-32 w-32 rounded-lg border border-slate-200 p-1" />
           }
           <div class="min-w-0 flex-1">
             <a
-              [href]="state().publicUrl"
+              [href]="publicUrlField()"
               target="_blank"
               rel="noopener noreferrer"
               class="block truncate text-sm font-medium text-blue-600 hover:underline"
             >
-              {{ state().publicUrl }}
+              {{ publicUrlField() }}
             </a>
             <p class="mt-1 text-xs text-slate-400">Scan the QR code with your phone to reach this server from anywhere.</p>
             <button

@@ -6,7 +6,7 @@ import { catchError, interval, of, startWith, switchMap } from 'rxjs';
 import * as QRCode from 'qrcode';
 import { TunnelService, TunnelState } from './tunnel.service';
 
-const DEFAULT_LOCAL_URL = 'https://localhost:4443';
+const DEFAULT_LOCAL_URL = 'https://localhost/PMS/';
 const POLL_INTERVAL_MS = 2000;
 
 const EMPTY_STATE: TunnelState = {
@@ -36,6 +36,13 @@ export class AppComponent implements OnInit {
   readonly copied = signal(false);
   readonly qrDataUrl = signal<string | null>(null);
   readonly showLogs = signal(false);
+
+  /** Editable public URL field, seeded from the generated tunnel link; the
+   * user can append a path (e.g. "/PMS") and the QR code + open-link href
+   * follow whatever is typed here. */
+  readonly publicUrlField = signal('');
+  private lastKnownPublicUrl: string | null = null;
+  private qrDebounceHandle?: ReturnType<typeof setTimeout>;
 
   ngOnInit(): void {
     interval(POLL_INTERVAL_MS)
@@ -93,8 +100,14 @@ export class AppComponent implements OnInit {
     });
   }
 
+  onPublicUrlFieldChange(value: string): void {
+    this.publicUrlField.set(value);
+    if (this.qrDebounceHandle) clearTimeout(this.qrDebounceHandle);
+    this.qrDebounceHandle = setTimeout(() => this.generateQr(value), 300);
+  }
+
   async copyPublicUrl(): Promise<void> {
-    const url = this.state().publicUrl;
+    const url = this.publicUrlField();
     if (!url) return;
     await navigator.clipboard.writeText(url);
     this.copied.set(true);
@@ -140,15 +153,26 @@ export class AppComponent implements OnInit {
     this.state.set(state);
     if (state.localUrl) this.localUrl.set(state.localUrl);
 
-    if (state.publicUrl) {
+    if (state.publicUrl && state.publicUrl !== this.lastKnownPublicUrl) {
+      // A new tunnel link was generated (or we just loaded) — (re)seed the
+      // editable field with it, discarding any previously appended text.
+      this.lastKnownPublicUrl = state.publicUrl;
+      this.publicUrlField.set(state.publicUrl);
       this.generateQr(state.publicUrl);
-    } else {
+    } else if (!state.publicUrl) {
+      this.lastKnownPublicUrl = null;
+      this.publicUrlField.set('');
       this.qrDataUrl.set(null);
     }
   }
 
   private generateQr(url: string): void {
-    QRCode.toDataURL(url, { margin: 1, width: 220 })
+    const trimmed = url.trim();
+    if (!trimmed) {
+      this.qrDataUrl.set(null);
+      return;
+    }
+    QRCode.toDataURL(trimmed, { margin: 1, width: 220 })
       .then((dataUrl) => this.qrDataUrl.set(dataUrl))
       .catch(() => this.qrDataUrl.set(null));
   }

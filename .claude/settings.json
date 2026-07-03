@@ -22,7 +22,28 @@
       "Bash(taskkill //PID 25876 //F)",
       "Bash(where winget *)",
       "Bash(where choco *)",
-      "Bash(winget install *)"
+      "Bash(winget install *)",
+      "Bash(\"/c/Program Files \\(x86\\)/cloudflared/cloudflared.exe\" --version)",
+      "Bash(reg query *)",
+      "Bash(where openssl *)",
+      "Bash(openssl version *)",
+      "Bash(curl -sk https://localhost:4443/)",
+      "Bash(cd \"d:/Don-Formbird-Works/github-projects/local-to-live-url/server\")",
+      "Bash(PATH='/c/Program Files \\(x86\\)/cloudflared:__TRACKED_VAR__' node src/index.js)",
+      "Bash(curl -s https://anne-outdoor-mounting-charges.trycloudflare.com/)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" https://anne-outdoor-mounting-charges.trycloudflare.com/)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" --max-time 8 https://anne-outdoor-mounting-charges.trycloudflare.com/)",
+      "Bash(taskkill //PID 15116 //F)",
+      "Bash(taskkill //PID 17496 //F)",
+      "Bash(curl -sk -o /dev/null -w \"HTTP %{http_code}\\\\n\" --max-time 5 https://localhost/PMS/)",
+      "Bash(curl -s -X POST http://localhost:3000/api/tunnel/start -H 'Content-Type: application/json' -d '{\"localUrl\":\"https://localhost/PMS/\"}')",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" https://collar-vol-mistress-dist.trycloudflare.com/PMS/)",
+      "Bash(curl -sk -o /dev/null -w \"local direct: HTTP %{http_code}\\\\n\" https://localhost/PMS/)",
+      "Bash(node -pe \"const s=JSON.parse\\(require\\('fs'\\).readFileSync\\(0,'utf8'\\)\\); \\({status:s.status, publicUrl:s.publicUrl}\\)\")",
+      "Bash(taskkill //PID 8824 //F)",
+      "Bash(curl -s http://localhost:4200/main.js)",
+      "Bash(node -pe \"JSON.parse\\(require\\('fs'\\).readFileSync\\(0,'utf8'\\)\\).publicUrl\")",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" https://collar-vol-mistress-dist.trycloudflare.com/PMS)"
     ]
   }
 }
