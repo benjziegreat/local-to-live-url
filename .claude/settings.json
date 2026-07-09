@@ -43,7 +43,21 @@
       "Bash(taskkill //PID 8824 //F)",
       "Bash(curl -s http://localhost:4200/main.js)",
       "Bash(node -pe \"JSON.parse\\(require\\('fs'\\).readFileSync\\(0,'utf8'\\)\\).publicUrl\")",
-      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" https://collar-vol-mistress-dist.trycloudflare.com/PMS)"
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" https://collar-vol-mistress-dist.trycloudflare.com/PMS)",
+      "Bash(where ssh *)",
+      "PowerShell(Get-Service sshd -ErrorAction SilentlyContinue)",
+      "Bash(curl -s http://localhost:3000/api/ssh-tunnel/status)",
+      "Bash(curl -s -X POST http://localhost:3000/api/ssh-tunnel/start -H 'Content-Type: application/json' -d '{\"localUrl\":\"https://localhost/PMS/\"}')",
+      "Bash(curl -s -X POST http://localhost:3000/api/ssh-tunnel/start -H 'Content-Type: application/json' -d '{\"localUrl\":\"https://localhost/PMS/\",\"publicIp\":\"127.0.0.1\",\"sshUser\":\"nouser\",\"sshPort\":2,\"remotePort\":8443}')",
+      "Bash(node -pe \"const s=JSON.parse\\(require\\('fs'\\).readFileSync\\(0,'utf8'\\)\\); JSON.stringify\\({status:s.status, error:s.error, logs:s.logs}, null, 2\\)\")",
+      "Bash(curl -s -X POST http://localhost:3000/api/ssh-tunnel/stop)",
+      "Bash(PATH='/c/Program Files \\(x86\\)/cloudflared:__TRACKED_VAR__' curl -s -X POST http://localhost:3000/api/ssh-tunnel/start -H 'Content-Type: application/json' -d '{\"localUrl\":\"https://localhost/PMS/\",\"publicIp\":\"github.com\",\"sshUser\":\"nobody-test-user\",\"sshPort\":22,\"remotePort\":8443}')",
+      "Bash(echo)",
+      "Bash(sleep 3)",
+      "Bash(curl -s http://localhost:4200/api/ssh-tunnel/status)",
+      "Bash(curl -s https://api.ipify.org)",
+      "WebFetch(domain:138.84.112.166)",
+      "Bash(curl -sk -o /dev/null -w \"https://localhost:8443/PMS/  -> HTTP %{http_code}\\\\n\" --max-time 5 https://localhost:8443/PMS/)"
     ]
   }
 }

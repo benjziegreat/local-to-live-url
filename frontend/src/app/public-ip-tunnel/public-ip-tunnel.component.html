@@ -1,0 +1,181 @@
+<p class="mb-6 text-sm text-slate-500">
+  Expose a local HTTPS server via an SSH reverse tunnel to a server you control at a known public IP or domain, which
+  then acts as the public entry point.
+</p>
+
+<div class="mb-6 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">
+  Requires SSH access to a reachable server at that public IP (key-based auth only) and <code>GatewayPorts</code>
+  enabled in its <code>sshd_config</code> so the forwarded port isn't restricted to that server's own loopback.
+</div>
+
+<section class="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+  <div class="flex items-center justify-between">
+    <h2 class="text-sm font-medium text-slate-700">Status</h2>
+    <span
+      class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset"
+      [ngClass]="statusBadgeClasses"
+    >
+      {{ state().status }}
+    </span>
+  </div>
+
+  <div class="mt-5">
+    <label for="ipLocalUrl" class="block text-sm font-medium text-slate-700">Local HTTPS server</label>
+    <input
+      id="ipLocalUrl"
+      type="text"
+      [ngModel]="localUrl()"
+      (ngModelChange)="localUrl.set($event)"
+      [ngModelOptions]="{ standalone: true }"
+      [disabled]="fieldsDisabled"
+      placeholder="https://localhost/PMS/"
+      class="mt-1.5 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 disabled:bg-slate-50 disabled:text-slate-500"
+    />
+  </div>
+
+  <div class="mt-4">
+    <label for="publicIp" class="block text-sm font-medium text-slate-700">URL of public IP (serves as domain)</label>
+    <input
+      id="publicIp"
+      type="text"
+      [ngModel]="publicIp()"
+      (ngModelChange)="publicIp.set($event)"
+      [ngModelOptions]="{ standalone: true }"
+      [disabled]="fieldsDisabled"
+      placeholder="203.0.113.10 or tunnel.example.com"
+      class="mt-1.5 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 disabled:bg-slate-50 disabled:text-slate-500"
+    />
+  </div>
+
+  <div class="mt-4 grid grid-cols-2 gap-4">
+    <div>
+      <label for="sshUser" class="block text-sm font-medium text-slate-700">SSH user</label>
+      <input
+        id="sshUser"
+        type="text"
+        [ngModel]="sshUser()"
+        (ngModelChange)="sshUser.set($event)"
+        [ngModelOptions]="{ standalone: true }"
+        [disabled]="fieldsDisabled"
+        placeholder="ubuntu"
+        class="mt-1.5 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 disabled:bg-slate-50 disabled:text-slate-500"
+      />
+    </div>
+    <div>
+      <label for="sshPort" class="block text-sm font-medium text-slate-700">SSH port</label>
+      <input
+        id="sshPort"
+        type="number"
+        [ngModel]="sshPort()"
+        (ngModelChange)="sshPort.set($event)"
+        [ngModelOptions]="{ standalone: true }"
+        [disabled]="fieldsDisabled"
+        class="mt-1.5 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 disabled:bg-slate-50 disabled:text-slate-500"
+      />
+    </div>
+  </div>
+
+  <div class="mt-4 grid grid-cols-2 gap-4">
+    <div>
+      <label for="remotePort" class="block text-sm font-medium text-slate-700">Remote bind port</label>
+      <input
+        id="remotePort"
+        type="number"
+        [ngModel]="remotePort()"
+        (ngModelChange)="remotePort.set($event)"
+        [ngModelOptions]="{ standalone: true }"
+        [disabled]="fieldsDisabled"
+        class="mt-1.5 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 disabled:bg-slate-50 disabled:text-slate-500"
+      />
+      <p class="mt-1.5 text-xs text-slate-400">Port opened on the public server; becomes part of the public URL.</p>
+    </div>
+    <div>
+      <label for="privateKeyPath" class="block text-sm font-medium text-slate-700">Private key path (optional)</label>
+      <input
+        id="privateKeyPath"
+        type="text"
+        [ngModel]="privateKeyPath()"
+        (ngModelChange)="privateKeyPath.set($event)"
+        [ngModelOptions]="{ standalone: true }"
+        [disabled]="fieldsDisabled"
+        placeholder="~/.ssh/id_ed25519"
+        class="mt-1.5 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 disabled:bg-slate-50 disabled:text-slate-500"
+      />
+    </div>
+  </div>
+
+  <button
+    type="button"
+    (click)="toggleTunnel()"
+    [disabled]="isToggleDisabled"
+    class="mt-5 inline-flex w-full items-center justify-center rounded-md px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+    [ngClass]="state().status === 'running' || state().status === 'starting' ? 'bg-red-600 hover:bg-red-500' : 'bg-emerald-600 hover:bg-emerald-500'"
+  >
+    {{ toggleLabel }}
+  </button>
+
+  @if (actionError()) {
+    <p class="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{{ actionError() }}</p>
+  }
+  @if (state().status === 'error' && state().error) {
+    <p class="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{{ state().error }}</p>
+  }
+</section>
+
+@if (state().publicUrl) {
+  <section class="mt-6 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+    <h2 class="text-sm font-medium text-slate-700">Public URL</h2>
+
+    <label for="ipPublicUrlField" class="mt-3 block text-xs font-medium text-slate-500">
+      Tunnel link (append a path to point the QR code and link at it)
+    </label>
+    <input
+      id="ipPublicUrlField"
+      type="text"
+      [ngModel]="publicUrlField()"
+      (ngModelChange)="onPublicUrlFieldChange($event)"
+      [ngModelOptions]="{ standalone: true }"
+      class="mt-1.5 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-mono shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+    />
+
+    <div class="mt-4 flex flex-col gap-4 sm:flex-row sm:items-center">
+      @if (qrDataUrl()) {
+        <img [src]="qrDataUrl()" alt="QR code for public tunnel URL" class="h-32 w-32 rounded-lg border border-slate-200 p-1" />
+      }
+      <div class="min-w-0 flex-1">
+        <a
+          [href]="publicUrlField()"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="block truncate text-sm font-medium text-blue-600 hover:underline"
+        >
+          {{ publicUrlField() }}
+        </a>
+        <p class="mt-1 text-xs text-slate-400">Scan the QR code with your phone to reach this server from anywhere.</p>
+        <button
+          type="button"
+          (click)="copyPublicUrl()"
+          class="mt-3 inline-flex items-center rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+        >
+          {{ copied() ? 'Copied!' : 'Copy link' }}
+        </button>
+      </div>
+    </div>
+  </section>
+}
+
+@if (state().logs.length) {
+  <section class="mt-6 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+    <button
+      type="button"
+      (click)="toggleLogs()"
+      class="flex w-full items-center justify-between text-sm font-medium text-slate-700"
+    >
+      ssh logs
+      <span class="text-slate-400">{{ showLogs() ? 'Hide' : 'Show' }}</span>
+    </button>
+    @if (showLogs()) {
+      <pre class="mt-3 max-h-64 overflow-auto rounded-md bg-slate-900 p-3 text-xs leading-relaxed text-slate-100">{{ state().logs.join('\n') }}</pre>
+    }
+  </section>
+}
