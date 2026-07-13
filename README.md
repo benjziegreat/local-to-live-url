@@ -3,7 +3,7 @@
 Admin dashboard with two ways to make a local HTTPS server reachable from a phone (or anywhere) without touching router or LAN configuration:
 
 - **Tunnel Admin** &mdash; starts/stops a [Cloudflare quick Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/do-more-with-tunnels/trycloudflare/), giving you a random `https://<random>.trycloudflare.com` URL.
-- **Tunnel to DNS url** &mdash; starts/stops a named [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) already DNS-routed to a subdomain you control, which then acts as the public entry point.
+- **Tunnel to DNS url** &mdash; starts/stops up to five independent named [Cloudflare Tunnels](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/), each bound to its own subdomain, which then acts as that slot's public entry point. If a subdomain's tunnel doesn't exist yet, starting it provisions one automatically.
 
 Both tabs share the same page and poll their own independent tunnel process.
 
@@ -14,7 +14,7 @@ Both tabs share the same page and poll their own independent tunnel process.
 
 - Node.js 20+
 - [`cloudflared`](https://github.com/cloudflare/cloudflared) installed and on your `PATH`
-- For the **Tunnel to DNS url** tab specifically: a named Cloudflare Tunnel already created and authenticated locally (`cloudflared tunnel login`, `cloudflared tunnel create <name>`) and DNS-routed to your subdomain (`cloudflared tunnel route dns <name> <subdomain>`), using the subdomain itself as the tunnel name/ID
+- For the **Tunnel to DNS url** tab specifically: `cloudflared tunnel login` run once, with the zone for your subdomain(s) authorized. Each named tunnel + DNS route is then created automatically on first start (using the subdomain itself as the tunnel name/ID) &mdash; no need to run `tunnel create` / `tunnel route dns` by hand.
 
 ## Run it
 
@@ -33,7 +33,7 @@ npm start         # ng serve on http://localhost:4200, proxies /api to the backe
 Open http://localhost:4200 and pick a tab:
 
 - **Tunnel Admin**: enter the local HTTPS server address (e.g. `https://localhost/PMS/`) and click **Start Tunnel**. Once cloudflared reports its assigned URL, the dashboard shows the public link and a QR code.
-- **Tunnel to DNS url**: enter the local HTTPS server and the subdomain your named Cloudflare Tunnel is already DNS-routed to, then click **Start Tunnel**. The public URL is `https://<subdomain>`.
+- **Tunnel to DNS url**: up to five independent rows, each with its own local HTTPS server and subdomain field. Click **Start Tunnel** on a row; if that subdomain has no named tunnel yet, one is created and DNS-routed automatically. The public URL for that row is `https://<subdomain>`.
 
 ## How it works
 
@@ -46,11 +46,11 @@ Open http://localhost:4200 and pick a tab:
 
 Quick Tunnels are ephemeral &mdash; the public URL changes every time you start a new tunnel.
 
-### Tunnel to DNS url (named Cloudflare Tunnel)
+### Tunnel to DNS url (named Cloudflare Tunnels, up to 5 slots)
 
-1. The Angular dashboard (`frontend/src/app/public-ip-tunnel/public-ip-tunnel.component.ts`) posts the local URL and subdomain to `POST /api/dns-tunnel/start`.
-2. The backend (`server/src/dnsTunnelManager.js`) spawns `cloudflared tunnel --url <localUrl> run <subdomain>`, using the subdomain as the tunnel name/ID &mdash; this assumes you've already run `cloudflared tunnel route dns <subdomain> <subdomain>` (or created the tunnel under that name) so Cloudflare's edge already knows where to route it.
+1. The Angular dashboard renders five `app-dns-tunnel-row` instances (`frontend/src/app/dns-tunnel-row/dns-tunnel-row.component.ts`), each posting its local URL and subdomain to `POST /api/dns-tunnel/:id/start` (`id` 0&ndash;4).
+2. The backend (`server/src/dnsTunnelManager.js`) manages five independent slots. On `start`, a slot first checks `cloudflared tunnel info <subdomain>`; if it doesn't exist, it runs `cloudflared tunnel create <subdomain>` and `cloudflared tunnel route dns --overwrite-dns <subdomain> <subdomain>` before launching `cloudflared tunnel --url <localUrl> run <subdomain>`, using the subdomain as the tunnel name/ID.
 3. The backend watches the process output for `Registered tunnel connection` (falling back to a grace period if that log line isn't seen) and reports the public URL as `https://<subdomain>`.
-4. `POST /api/dns-tunnel/stop` kills the `cloudflared` process.
+4. `POST /api/dns-tunnel/:id/stop` kills that slot's `cloudflared` process.
 
-Both tunnel types run independently and only one instance of each runs at a time.
+All tunnel slots (Tunnel Admin, and each of the five DNS-url slots) run independently.

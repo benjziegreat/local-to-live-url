@@ -1,0 +1,116 @@
+<section class="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+  <div class="flex items-center justify-between">
+    <h2 class="text-sm font-medium text-slate-700">Tunnel {{ id() + 1 }}</h2>
+    <span
+      class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset"
+      [ngClass]="statusBadgeClasses"
+    >
+      {{ state().status }}
+    </span>
+  </div>
+
+  <div class="mt-5">
+    <label for="ipLocalUrl-{{ id() }}" class="block text-sm font-medium text-slate-700">Local HTTPS server</label>
+    <input
+      id="ipLocalUrl-{{ id() }}"
+      type="text"
+      [ngModel]="localUrl()"
+      (ngModelChange)="localUrl.set($event)"
+      [ngModelOptions]="{ standalone: true }"
+      [disabled]="busy()"
+      placeholder="https://localhost/PMS/"
+      class="mt-1.5 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 disabled:bg-slate-50 disabled:text-slate-500"
+    />
+    <p class="mt-1.5 text-xs text-slate-400">Any local URL (http or https, any host/port/path). Editable at any time &mdash; restart the tunnel to apply a change while running.</p>
+  </div>
+
+  <div class="mt-4">
+    <label for="subdomain-{{ id() }}" class="block text-sm font-medium text-slate-700">Cloudflared subdomain url</label>
+    <input
+      id="subdomain-{{ id() }}"
+      type="text"
+      [ngModel]="subdomain()"
+      (ngModelChange)="subdomain.set($event)"
+      [ngModelOptions]="{ standalone: true }"
+      [disabled]="fieldsDisabled"
+      placeholder="cjcshell.intekn-app.com"
+      class="mt-1.5 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 disabled:bg-slate-50 disabled:text-slate-500"
+    />
+    <p class="mt-1.5 text-xs text-slate-400">Bare hostname, e.g. <code>cjcshell.intekn-app.com</code> (no <code>https://</code> or trailing slash needed). Created and DNS-routed automatically on start if it doesn't exist yet.</p>
+  </div>
+
+  <button
+    type="button"
+    (click)="toggleTunnel()"
+    [disabled]="isToggleDisabled"
+    class="mt-5 inline-flex w-full items-center justify-center rounded-md px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+    [ngClass]="state().status === 'running' || state().status === 'starting' ? 'bg-red-600 hover:bg-red-500' : 'bg-emerald-600 hover:bg-emerald-500'"
+  >
+    {{ toggleLabel }}
+  </button>
+
+  @if (actionError()) {
+    <p class="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{{ actionError() }}</p>
+  }
+  @if (state().status === 'error' && state().error) {
+    <p class="mt-3 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{{ state().error }}</p>
+  }
+</section>
+
+@if (state().publicUrl) {
+  <section class="mt-4 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+    <h2 class="text-sm font-medium text-slate-700">Public URL</h2>
+
+    <label for="ipPublicUrlField-{{ id() }}" class="mt-3 block text-xs font-medium text-slate-500">
+      Tunnel link (append a path to point the QR code and link at it)
+    </label>
+    <input
+      id="ipPublicUrlField-{{ id() }}"
+      type="text"
+      [ngModel]="publicUrlField()"
+      (ngModelChange)="onPublicUrlFieldChange($event)"
+      [ngModelOptions]="{ standalone: true }"
+      class="mt-1.5 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-mono shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+    />
+
+    <div class="mt-4 flex flex-col gap-4 sm:flex-row sm:items-center">
+      @if (qrDataUrl()) {
+        <img [src]="qrDataUrl()" alt="QR code for public tunnel URL" class="h-32 w-32 rounded-lg border border-slate-200 p-1" />
+      }
+      <div class="min-w-0 flex-1">
+        <a
+          [href]="publicUrlField()"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="block truncate text-sm font-medium text-blue-600 hover:underline"
+        >
+          {{ publicUrlField() }}
+        </a>
+        <p class="mt-1 text-xs text-slate-400">Scan the QR code with your phone to reach this server from anywhere.</p>
+        <button
+          type="button"
+          (click)="copyPublicUrl()"
+          class="mt-3 inline-flex items-center rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+        >
+          {{ copied() ? 'Copied!' : 'Copy link' }}
+        </button>
+      </div>
+    </div>
+  </section>
+}
+
+@if (state().logs.length) {
+  <section class="mt-4 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+    <button
+      type="button"
+      (click)="toggleLogs()"
+      class="flex w-full items-center justify-between text-sm font-medium text-slate-700"
+    >
+      cloudflared logs
+      <span class="text-slate-400">{{ showLogs() ? 'Hide' : 'Show' }}</span>
+    </button>
+    @if (showLogs()) {
+      <pre class="mt-3 max-h-64 overflow-auto rounded-md bg-slate-900 p-3 text-xs leading-relaxed text-slate-100">{{ state().logs.join('\n') }}</pre>
+    }
+  </section>
+}
