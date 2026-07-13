@@ -4,14 +4,12 @@ import { FormsModule } from '@angular/forms';
 import { NgClass } from '@angular/common';
 import { catchError, interval, of, startWith, switchMap } from 'rxjs';
 import * as QRCode from 'qrcode';
-import { PublicIpTunnelService, SshTunnelState } from '../public-ip-tunnel.service';
+import { PublicIpTunnelService, DnsTunnelState } from '../public-ip-tunnel.service';
 
 const DEFAULT_LOCAL_URL = 'https://localhost/PMS/';
-const DEFAULT_SSH_PORT = 22;
-const DEFAULT_REMOTE_PORT = 8443;
 const POLL_INTERVAL_MS = 2000;
 
-const EMPTY_STATE: SshTunnelState = {
+const EMPTY_STATE: DnsTunnelState = {
   status: 'stopped',
   localUrl: null,
   publicUrl: null,
@@ -32,13 +30,9 @@ export class PublicIpTunnelComponent implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
 
   readonly localUrl = signal(DEFAULT_LOCAL_URL);
-  readonly publicIp = signal('');
-  readonly sshUser = signal('');
-  readonly sshPort = signal(DEFAULT_SSH_PORT);
-  readonly remotePort = signal(DEFAULT_REMOTE_PORT);
-  readonly privateKeyPath = signal('');
+  readonly subdomain = signal('');
 
-  readonly state = signal<SshTunnelState>(EMPTY_STATE);
+  readonly state = signal<DnsTunnelState>(EMPTY_STATE);
   readonly busy = signal(false);
   readonly actionError = signal<string | null>(null);
   readonly copied = signal(false);
@@ -49,6 +43,7 @@ export class PublicIpTunnelComponent implements OnInit {
    * user can append a path and the QR code + open-link href follow it. */
   readonly publicUrlField = signal('');
   private lastKnownPublicUrl: string | null = null;
+  private lastKnownLocalUrl: string | null = null;
   private qrDebounceHandle?: ReturnType<typeof setTimeout>;
 
   ngOnInit(): void {
@@ -74,26 +69,17 @@ export class PublicIpTunnelComponent implements OnInit {
 
   startTunnel(): void {
     const localUrl = this.localUrl().trim();
-    const publicIp = this.publicIp().trim();
-    const sshUser = this.sshUser().trim();
-    const remotePort = this.remotePort();
+    const subdomain = this.subdomain().trim();
 
-    if (!localUrl || !publicIp || !sshUser || !remotePort) {
-      this.actionError.set('Local HTTPS server, public IP / domain, SSH user and remote port are all required.');
+    if (!localUrl || !subdomain) {
+      this.actionError.set('Local HTTPS server and cloudflared subdomain url are both required.');
       return;
     }
 
     this.busy.set(true);
     this.actionError.set(null);
     this.tunnelService
-      .start({
-        localUrl,
-        publicIp,
-        sshUser,
-        sshPort: this.sshPort() || DEFAULT_SSH_PORT,
-        remotePort,
-        privateKeyPath: this.privateKeyPath().trim() || undefined,
-      })
+      .start({ localUrl, subdomain })
       .subscribe({
         next: (state) => {
           this.applyState(state);
@@ -174,9 +160,17 @@ export class PublicIpTunnelComponent implements OnInit {
     }
   }
 
-  private applyState(state: SshTunnelState): void {
+  private applyState(state: DnsTunnelState): void {
     this.state.set(state);
-    if (state.localUrl) this.localUrl.set(state.localUrl);
+    if (state.localUrl && state.localUrl !== this.lastKnownLocalUrl) {
+      // Only sync from the server when it reports a genuinely new value
+      // (e.g. on first load); otherwise the poll would keep overwriting
+      // whatever the user is actively typing with the tunnel's start URL.
+      this.lastKnownLocalUrl = state.localUrl;
+      this.localUrl.set(state.localUrl);
+    } else if (!state.localUrl) {
+      this.lastKnownLocalUrl = null;
+    }
 
     if (state.publicUrl && state.publicUrl !== this.lastKnownPublicUrl) {
       this.lastKnownPublicUrl = state.publicUrl;

@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const tunnelManager = require('./tunnelManager');
-const sshTunnelManager = require('./sshTunnelManager');
+const dnsTunnelManager = require('./dnsTunnelManager');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -35,26 +35,26 @@ app.post('/api/tunnel/stop', (req, res) => {
   }
 });
 
-app.get('/api/ssh-tunnel/status', (req, res) => {
-  res.json(sshTunnelManager.getStatus());
+app.get('/api/dns-tunnel/status', (req, res) => {
+  res.json(dnsTunnelManager.getAllStatus());
 });
 
-app.post('/api/ssh-tunnel/start', (req, res) => {
-  const { localUrl, publicIp, sshUser, sshPort, remotePort, privateKeyPath } = req.body || {};
-  if (!localUrl || !publicIp || !sshUser || !remotePort) {
-    return res.status(400).json({ error: 'localUrl, publicIp, sshUser and remotePort are required' });
+app.post('/api/dns-tunnel/:id/start', (req, res) => {
+  const { localUrl, subdomain } = req.body || {};
+  if (!localUrl || !subdomain) {
+    return res.status(400).json({ error: 'localUrl and subdomain are required' });
   }
   try {
-    const status = sshTunnelManager.start({ localUrl, publicIp, sshUser, sshPort, remotePort, privateKeyPath });
+    const status = dnsTunnelManager.start(req.params.id, { localUrl, subdomain });
     res.status(202).json(status);
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
-app.post('/api/ssh-tunnel/stop', (req, res) => {
+app.post('/api/dns-tunnel/:id/stop', (req, res) => {
   try {
-    const status = sshTunnelManager.stop();
+    const status = dnsTunnelManager.stop(req.params.id);
     res.status(202).json(status);
   } catch (err) {
     res.status(err.statusCode || 500).json({ error: err.message });

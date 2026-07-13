@@ -42,6 +42,7 @@ export class TunnelAdminComponent implements OnInit {
    * follow whatever is typed here. */
   readonly publicUrlField = signal('');
   private lastKnownPublicUrl: string | null = null;
+  private lastKnownLocalUrl: string | null = null;
   private qrDebounceHandle?: ReturnType<typeof setTimeout>;
 
   ngOnInit(): void {
@@ -151,7 +152,15 @@ export class TunnelAdminComponent implements OnInit {
 
   private applyState(state: TunnelState): void {
     this.state.set(state);
-    if (state.localUrl) this.localUrl.set(state.localUrl);
+    if (state.localUrl && state.localUrl !== this.lastKnownLocalUrl) {
+      // Only sync from the server when it reports a genuinely new value
+      // (e.g. on first load); otherwise the poll would keep overwriting
+      // whatever the user is actively typing with the tunnel's start URL.
+      this.lastKnownLocalUrl = state.localUrl;
+      this.localUrl.set(state.localUrl);
+    } else if (!state.localUrl) {
+      this.lastKnownLocalUrl = null;
+    }
 
     if (state.publicUrl && state.publicUrl !== this.lastKnownPublicUrl) {
       // A new tunnel link was generated (or we just loaded) — (re)seed the

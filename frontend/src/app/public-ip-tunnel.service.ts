@@ -2,10 +2,11 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 
-export type SshTunnelStatus = 'stopped' | 'starting' | 'running' | 'stopping' | 'error';
+export type DnsTunnelStatus = 'stopped' | 'starting' | 'running' | 'stopping' | 'error';
 
-export interface SshTunnelState {
-  status: SshTunnelStatus;
+export interface DnsTunnelState {
+  id: number;
+  status: DnsTunnelStatus;
   localUrl: string | null;
   publicUrl: string | null;
   startedAt: string | null;
@@ -13,30 +14,26 @@ export interface SshTunnelState {
   logs: string[];
 }
 
-export interface SshTunnelStartRequest {
+export interface DnsTunnelStartRequest {
   localUrl: string;
-  publicIp: string;
-  sshUser: string;
-  sshPort?: number;
-  remotePort: number;
-  privateKeyPath?: string;
+  subdomain: string;
 }
 
-const API_BASE = '/api/ssh-tunnel';
+const API_BASE = '/api/dns-tunnel';
 
 @Injectable({ providedIn: 'root' })
 export class PublicIpTunnelService {
   constructor(private readonly http: HttpClient) {}
 
-  getStatus(): Observable<SshTunnelState> {
-    return this.http.get<SshTunnelState>(`${API_BASE}/status`);
+  getAllStatus(): Observable<DnsTunnelState[]> {
+    return this.http.get<DnsTunnelState[]>(`${API_BASE}/status`);
   }
 
-  start(request: SshTunnelStartRequest): Observable<SshTunnelState> {
-    return this.http.post<SshTunnelState>(`${API_BASE}/start`, request);
+  start(id: number, request: DnsTunnelStartRequest): Observable<DnsTunnelState> {
+    return this.http.post<DnsTunnelState>(`${API_BASE}/${id}/start`, request);
   }
 
-  stop(): Observable<SshTunnelState> {
-    return this.http.post<SshTunnelState>(`${API_BASE}/stop`, {});
+  stop(id: number): Observable<DnsTunnelState> {
+    return this.http.post<DnsTunnelState>(`${API_BASE}/${id}/stop`, {});
   }
 }
