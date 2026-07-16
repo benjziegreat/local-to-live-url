@@ -22,7 +22,7 @@ Both tabs share the same page and poll their own independent tunnel process.
 # Terminal 1 — backend (manages the cloudflared / ssh processes)
 cd server
 npm install
-npm start        # listens on http://localhost:3000
+npm start        # listens on http://localhost:3050
 
 # Terminal 2 — frontend (admin dashboard)
 cd frontend
