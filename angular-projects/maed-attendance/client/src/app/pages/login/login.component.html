@@ -1,0 +1,52 @@
+<div class="wrap">
+  <section class="intro">
+    <span class="logo"><app-icon name="radar" [size]="28" /></span>
+    <p class="eyebrow">MAEd IT Integration</p>
+    <h1>Geo-fenced Attendance Ecosystem</h1>
+    <p class="lead">
+      Automated campus check-in, live class rosters, early-warning risk profiles and real-time
+      parent tracking — connected in one place.
+    </p>
+    <ul class="features">
+      <li class="glass"><app-icon name="pin" /> Geofence arrival &amp; exit logs</li>
+      <li class="glass"><app-icon name="users" /> Live roster with cutting flags</li>
+      <li class="glass"><app-icon name="shield" /> Dropout-risk early warning</li>
+      <li class="glass"><app-icon name="message" /> Parent ↔ adviser messaging</li>
+    </ul>
+  </section>
+
+  <section class="card login">
+    <h2>Sign in</h2>
+    <p class="muted small">Use your school account.</p>
+
+    <form class="stack" (ngSubmit)="submit()">
+      <label class="field">
+        <span>Email</span>
+        <input class="input" type="email" name="email" [(ngModel)]="email" autocomplete="username" required />
+      </label>
+      <label class="field">
+        <span>Password</span>
+        <input class="input" type="password" name="password" [(ngModel)]="password" autocomplete="current-password" required />
+      </label>
+      @if (error()) {
+        <p class="error" role="alert"><app-icon name="alert" [size]="16" /> {{ error() }}</p>
+      }
+      <button class="btn primary block" type="submit" [disabled]="busy() || !email || !password">
+        {{ busy() ? 'Signing in…' : 'Sign in' }}
+      </button>
+    </form>
+
+    <div class="divider"><span>or try a demo portal</span></div>
+
+    <div class="demo">
+      @for (d of demo; track d.email) {
+        <button type="button" class="demo-btn" (click)="useDemo(d.email)" [disabled]="busy()">
+          <app-icon [name]="d.icon" [size]="20" />
+          <strong>{{ d.role }}</strong>
+          <small>{{ d.blurb }}</small>
+        </button>
+      }
+    </div>
+    <p class="muted small center">Demo password: <code>password123</code></p>
+  </section>
+</div>

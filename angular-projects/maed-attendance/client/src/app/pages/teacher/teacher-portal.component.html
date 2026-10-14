@@ -1,0 +1,169 @@
+<div class="page">
+  <div class="page-head">
+    <div>
+      <p class="eyebrow">Live class dashboard</p>
+      <h1>{{ roster()?.schedule?.subject || 'My classes' }}</h1>
+      @if (roster(); as r) {
+        <p>{{ r.schedule.section }} · {{ r.schedule.room }} · {{ to12h(r.schedule.startTime) }} – {{ to12h(r.schedule.endTime) }}</p>
+      }
+    </div>
+    <button class="btn danger" type="button" (click)="openAlert()" [disabled]="!roster()">
+      <app-icon name="bell" /> Trigger early alert to adviser
+    </button>
+  </div>
+
+  <!-- Pickers -->
+  <section class="card pickers">
+    <label class="field">
+      <span>Subject</span>
+      <select class="input" [ngModel]="subjectId()" (ngModelChange)="onSubjectChange($event)">
+        @for (s of subjects(); track s.id) { <option [ngValue]="s.id">{{ s.name }}</option> }
+      </select>
+    </label>
+    <label class="field">
+      <span>Time</span>
+      <select class="input" [ngModel]="scheduleId()" (ngModelChange)="onScheduleChange($event)">
+        @for (sc of schedules(); track sc.id) {
+          <option [ngValue]="sc.id">{{ sc.dayOfWeek === today() ? 'Today' : sc.day }} · {{ to12h(sc.startTime) }} · {{ sc.room }}</option>
+        }
+      </select>
+    </label>
+    <label class="field">
+      <span>Filter</span>
+      <select class="input" [ngModel]="filter()" (ngModelChange)="filter.set($event)">
+        @for (f of FILTERS; track f.id) { <option [ngValue]="f.id">{{ f.label }}</option> }
+      </select>
+    </label>
+  </section>
+
+  <!-- KPIs -->
+  <div class="kpis">
+    <div class="card kpi-card"><span class="eyebrow">In room</span><span class="kpi ok">{{ counts().inRoom }}</span><small class="muted">of {{ counts().total }}</small></div>
+    <div class="card kpi-card"><span class="eyebrow">Out of room</span><span class="kpi bad">{{ counts().flagged }}</span><small class="muted">on campus, possible cutting</small></div>
+    <div class="card kpi-card"><span class="eyebrow">Outside campus</span><span class="kpi warn">{{ counts().off }}</span><small class="muted">not detected at school</small></div>
+    <div class="card kpi-card"><span class="eyebrow">Marked</span><span class="kpi">{{ counts().marked }}</span><small class="muted">attendance recorded</small></div>
+  </div>
+
+  <div class="grid grid-main">
+    <!-- Live roster -->
+    <section class="card" id="roster">
+      <div class="card-title">
+        <h2><app-icon name="users" /> Live roster</h2>
+        @if (roster()?.live) {
+          <span class="badge success dot pulse">In session · live</span>
+        } @else {
+          <span class="badge" title="Location flags apply only while the class is in session">Not in session</span>
+        }
+      </div>
+
+      @if (roster()) {
+        <div class="table-wrap">
+          <table class="table stacked">
+            <thead>
+              <tr><th>Student</th><th>Location</th><th>Mark</th><th class="right">Actions</th></tr>
+            </thead>
+            <tbody>
+              @for (s of students(); track s.id) {
+                <tr [class.flag]="s.suspectedCutting">
+                  <td>
+                    <div class="who">
+                      <app-avatar [name]="s.name" [hue]="s.avatarHue" [size]="36" />
+                      <div><strong>{{ s.name }}</strong><small class="muted">{{ s.studentNo }}</small></div>
+                    </div>
+                  </td>
+                  <td data-label="Location">
+                    <div class="loc">
+                      @if (s.inThisRoom) {
+                        <span class="badge success dot">On campus</span><small>In {{ roster()!.schedule.room }}</small>
+                      } @else if (s.suspectedCutting) {
+                        <span class="badge success dot">On campus</span>
+                        <small class="bad">Out of {{ roster()!.schedule.room }}{{ s.currentRoom ? ' (in ' + s.currentRoom + ')' : '' }} — flag!</small>
+                      } @else if (s.location !== 'OFF_CAMPUS') {
+                        <span class="badge success dot">On campus</span><small>{{ s.currentRoom ? 'In ' + s.currentRoom : 'Elsewhere on campus' }}</small>
+                      } @else {
+                        <span class="badge warning dot">Outside campus</span><small>Not present</small>
+                      }
+                    </div>
+                  </td>
+                  <td data-label="Mark">
+                    @if (s.status) {
+                      <span class="badge" [class]="STATUS_TONE[s.status]">{{ titleCase(s.status) }}</span>
+                    } @else {
+                      <span class="badge">Unmarked</span>
+                    }
+                    @if (s.alertRaised) { <span class="badge critical" title="Alert raised today"><app-icon name="bell" [size]="12" /></span> }
+                  </td>
+                  <td data-label="Actions" class="right">
+                    <div class="actions">
+                      @if (s.suspectedCutting) {
+                        <button class="btn danger sm" type="button" (click)="mark(s, 'CUTTING')" [disabled]="saving() === s.id || s.status === 'CUTTING'">
+                          <app-icon name="flag" [size]="14" /> Flag cutting
+                        </button>
+                      } @else if (s.inThisRoom) {
+                        <button class="btn success sm" type="button" (click)="mark(s, 'PRESENT')" [disabled]="saving() === s.id || s.status === 'PRESENT'">
+                          <app-icon name="check" [size]="14" /> Mark present
+                        </button>
+                      } @else {
+                        <button class="btn sm" type="button" (click)="mark(s, 'ABSENT')" [disabled]="saving() === s.id || s.status === 'ABSENT'">
+                          Not present
+                        </button>
+                      }
+                      <select class="input more" aria-label="Set status" (change)="onMore(s, $event)">
+                        <option value="">More…</option>
+                        @for (st of STATUSES; track st) { <option [value]="st">{{ titleCase(st) }}</option> }
+                      </select>
+                      <button class="btn ghost sm icon-only" type="button" (click)="openAlert(s)" aria-label="Alert adviser about this student" title="Alert adviser">
+                        <app-icon name="bell" [size]="16" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              } @empty {
+                <tr><td colspan="4" class="empty">No students match this filter.</td></tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      } @else if (error()) {
+        <p class="empty">{{ error() }}</p>
+      } @else {
+        <div class="skeleton"></div>
+      }
+    </section>
+
+    <!-- Analytics -->
+    <section class="card" id="trends">
+      <div class="card-title"><h2><app-icon name="trend" /> Weekly class attendance trends</h2></div>
+      <p class="muted small">{{ subject()?.name }} · attendance rate per school day, last 7 days</p>
+      @if (trendPoints().length) {
+        <app-line-chart [points]="trendPoints()" [ariaLabel]="(subject()?.name || '') + ' weekly attendance rate'" />
+        <table class="table mini">
+          <caption class="sr-only">Daily attendance rate</caption>
+          <tbody>
+            <tr>@for (t of trends(); track t.date) { <th>{{ t.label }}</th> }</tr>
+            <tr>@for (t of trends(); track t.date) { <td>{{ t.rate === null ? '—' : t.rate + '%' }}</td> }</tr>
+          </tbody>
+        </table>
+      } @else {
+        <div class="skeleton"></div>
+      }
+    </section>
+  </div>
+</div>
+
+<app-modal title="Trigger early alert to adviser" [open]="alertOpen()" (closed)="alertOpen.set(false)">
+  <form class="stack" (ngSubmit)="sendAlert()">
+    <label class="field">
+      <span>Student</span>
+      <select class="input" name="student" [(ngModel)]="alertStudentId">
+        @for (s of roster()?.students ?? []; track s.id) { <option [ngValue]="s.id">{{ s.name }}</option> }
+      </select>
+    </label>
+    <label class="field">
+      <span>Message to adviser</span>
+      <textarea class="input" name="message" [(ngModel)]="alertMessage"
+                placeholder="e.g. Missed 3 sessions this month and seen outside the room during class."></textarea>
+    </label>
+    <button class="btn danger block" type="submit" [disabled]="!alertStudentId"><app-icon name="send" /> Send alert</button>
+  </form>
+</app-modal>

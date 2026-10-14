@@ -1,0 +1,169 @@
+@if (data(); as d) {
+  <div class="page">
+    <div class="page-head">
+      <div>
+        <p class="eyebrow">{{ d.student.section }} · {{ d.student.studentNo }}</p>
+        <h1>Welcome, {{ d.student.firstName }}!</h1>
+      </div>
+      <span class="badge dot pulse" [class]="LOCATION_TONE[d.student.location]">
+        {{ onCampus() ? 'In school premises' : 'Outside school premises' }}
+      </span>
+    </div>
+
+    <div class="layout">
+      <!-- Profile + entry/exit logs -->
+      <section class="card profile">
+        <app-avatar [name]="d.student.firstName + ' ' + d.student.lastName" [hue]="d.student.avatarHue" [size]="84" />
+        <h2>{{ d.student.firstName }} {{ d.student.lastName }}</h2>
+        <p class="muted small">Adviser: {{ d.student.adviser || '—' }}</p>
+        <div class="geo-status" [class.on]="onCampus()">
+          <app-icon [name]="onCampus() ? 'check-circle' : 'pin'" />
+          <div>
+            <strong>{{ onCampus() ? 'In school premises' : 'Off campus' }}</strong>
+            <small>Geofence {{ d.student.geofenceActive ? 'active' : 'paused' }}@if (d.student.currentRoom) { · {{ d.student.currentRoom }}}</small>
+          </div>
+        </div>
+
+        <h3 class="eyebrow logs-title">Entry / exit logs</h3>
+        <ul class="list logs">
+          @for (g of d.gateLogs; track g.id) {
+            <li class="list-item">
+              <app-icon [name]="g.event === 'ENTRY' ? 'door' : 'logout'" [class]="g.event === 'ENTRY' ? 'in' : 'out'" />
+              <div class="grow">
+                <strong>{{ g.timestamp | date: 'h:mm a' }}</strong>
+                <small class="muted">{{ g.timestamp | date: 'EEE, MMM d' }}</small>
+              </div>
+              <span class="badge" [class]="g.event === 'ENTRY' ? 'success' : 'muted'">{{ g.event === 'ENTRY' ? 'Entry' : 'Exit' }}</span>
+            </li>
+          } @empty {
+            <li class="empty">No gate activity yet.</li>
+          }
+        </ul>
+      </section>
+
+      <!-- Check-in, map, today's classes -->
+      <div class="center">
+        @if (d.checkIn) {
+          <div class="hero-banner success">
+            <app-icon name="check-circle" [size]="30" />
+            <div>Automated check-in successful<small>Arrived {{ d.checkIn.at | date: 'h:mm a' }} · {{ d.checkIn.gate }}</small></div>
+          </div>
+        } @else if (onCampus()) {
+          <div class="hero-banner success">
+            <app-icon name="check-circle" [size]="30" />
+            <div>On campus<small>Geofence verified</small></div>
+          </div>
+        } @else {
+          <div class="hero-banner muted">
+            <app-icon name="radar" [size]="30" />
+            <div>Awaiting check-in<small>Check-in happens automatically when you enter the school geofence</small></div>
+          </div>
+        }
+
+        <div class="split">
+          <app-geo-map class="map" [geofence]="d.geofence" [marker]="marker()" [inside]="onCampus()" />
+
+          <section class="card" id="classes">
+            <div class="card-title"><h2><app-icon name="book" /> Today's classes</h2></div>
+            <ul class="list">
+              @for (c of d.todaysClasses; track c.scheduleId) {
+                <li class="list-item class-row" [class.live]="c.inSession">
+                  <span class="time">{{ to12h(c.startTime) }}</span>
+                  <div class="grow">
+                    <strong>{{ c.subject }}</strong>
+                    <small class="muted">{{ c.room }}@if (c.inSession) { · <b class="now">now</b>}</small>
+                  </div>
+                  @if (c.status) {
+                    <span class="badge" [class]="STATUS_TONE[c.status]" [attr.title]="titleCase(c.status)">
+                      @if (c.status === 'PRESENT' || c.status === 'LATE' || c.status === 'EXCUSED') { <app-icon name="check" [size]="14" /> }
+                      {{ titleCase(c.status) }}
+                    </span>
+                  } @else {
+                    <span class="badge muted">Pending</span>
+                  }
+                </li>
+              } @empty {
+                <li class="empty">No classes scheduled today. Enjoy your rest day!</li>
+              }
+            </ul>
+          </section>
+        </div>
+      </div>
+
+      <!-- Attendance health -->
+      <section class="card health" id="health">
+        <div class="card-title"><h2><app-icon name="chart" /> Attendance health</h2></div>
+        <app-donut-chart [value]="d.health.rate" />
+        <p class="rate">Overall rate: <strong>{{ d.health.rate }}%</strong>
+          <span class="badge" [class]="d.health.rate >= 90 ? 'success' : d.health.rate >= 80 ? 'warning' : 'critical'">{{ d.health.label }}</span>
+        </p>
+        <dl class="stats">
+          <div><dt>Present</dt><dd>{{ d.health.present }}</dd></div>
+          <div><dt>Late</dt><dd>{{ d.health.late }}</dd></div>
+          <div><dt>Absent days</dt><dd>{{ d.health.unexcusedAbsences }}</dd></div>
+          <div><dt>Excused</dt><dd>{{ d.health.excused }}</dd></div>
+        </dl>
+        <button class="btn primary block" type="button" (click)="excuseOpen.set(true)">
+          <app-icon name="upload" /> Upload excuse note
+        </button>
+        @if (d.excuseNotes.length) {
+          <ul class="list notes">
+            @for (n of d.excuseNotes.slice(0, 3); track n.id) {
+              <li class="list-item">
+                <app-icon name="file" [size]="16" />
+                <small class="grow">{{ n.date | date: 'MMM d' }} — {{ n.reason }}</small>
+                <span class="badge" [class]="n.status === 'APPROVED' ? 'success' : n.status === 'REJECTED' ? 'critical' : 'warning'">{{ titleCase(n.status) }}</span>
+              </li>
+            }
+          </ul>
+        }
+      </section>
+    </div>
+
+    <!-- Location / geofence controls -->
+    <section class="card" id="location">
+      <div class="card-title">
+        <h2><app-icon name="gps" /> Location &amp; geofence</h2>
+        @if (lastPing(); as p) {
+          <span class="badge" [class]="p.inside ? 'success' : 'warning'">{{ p.inside ? 'Inside geofence' : p.distance + ' m away' }}</span>
+        }
+      </div>
+      <div class="controls">
+        <div class="stack">
+          <p class="muted small">Your device reports its position; the server checks it against the
+            {{ d.geofence.radiusMeters }} m school geofence and logs entry/exit automatically.</p>
+          <div class="row-wrap">
+            <button class="btn primary" type="button" (click)="useGps()" [disabled]="busy()">
+              <app-icon name="gps" /> Check in with my GPS
+            </button>
+            <button class="btn" type="button" (click)="toggleLiveTracking()" [class.success]="liveTracking()">
+              <app-icon name="radar" /> {{ liveTracking() ? 'Live tracking on' : 'Start live tracking' }}
+            </button>
+          </div>
+        </div>
+        <div class="stack sim glass">
+          <p class="eyebrow">Demo simulator</p>
+          <label class="field">
+            <span>Arrive in room</span>
+            <select class="input" [(ngModel)]="simRoom">
+              @for (r of d.rooms; track r) { <option [value]="r">{{ r }}{{ r === d.currentClass?.room ? ' (current class)' : '' }}</option> }
+            </select>
+          </label>
+          <div class="row-wrap">
+            <button class="btn success sm" type="button" (click)="simulateArrival()" [disabled]="busy()">Enter room</button>
+            <button class="btn sm" type="button" (click)="simulateCampusOnly()" [disabled]="busy()">On campus (hallway)</button>
+            <button class="btn warning sm" type="button" (click)="simulateLeave()" [disabled]="busy()">Leave campus</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <app-modal title="Upload excuse note" [open]="excuseOpen()" (closed)="excuseOpen.set(false)">
+    <app-excuse-form (submitted)="onExcuseSubmitted()" />
+  </app-modal>
+} @else if (error()) {
+  <div class="card empty">{{ error() }}</div>
+} @else {
+  <div class="page"><div class="skeleton"></div><div class="skeleton"></div></div>
+}

@@ -1,0 +1,245 @@
+// MAEd IT Integration — Geo-fenced Attendance Ecosystem
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  STUDENT
+  TEACHER
+  ADVISER
+  PARENT
+}
+
+/// Where a student currently is, as reported by the geofence / room check.
+enum LocationState {
+  IN_ROOM
+  ON_CAMPUS
+  OFF_CAMPUS
+}
+
+enum GateEvent {
+  ENTRY
+  EXIT
+}
+
+enum AttendanceStatus {
+  PRESENT
+  LATE
+  ABSENT
+  EXCUSED
+  CUTTING
+}
+
+enum ExcuseStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum AlertType {
+  EARLY_WARNING
+  UNEXCUSED_ABSENCE
+  CUTTING
+}
+
+enum InterventionOutcome {
+  GREEN
+  YELLOW
+  RED
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  email        String   @unique
+  passwordHash String
+  firstName    String
+  lastName     String
+  role         Role
+  avatarHue    Int      @default(210)
+  createdAt    DateTime @default(now())
+
+  student          Student?
+  advisedSections  Section[]          @relation("SectionAdviser")
+  taughtSubjects   Subject[]
+  children         ParentLink[]
+  markedRecords    AttendanceRecord[] @relation("MarkedBy")
+  alertsRaised     Alert[]            @relation("AlertRaisedBy")
+  interventions    Intervention[]
+  sentMessages     Message[]          @relation("Sender")
+  receivedMessages Message[]          @relation("Recipient")
+  excuseNotes      ExcuseNote[]       @relation("ExcuseSubmitter")
+  reviewedExcuses  ExcuseNote[]       @relation("ExcuseReviewer")
+}
+
+model Section {
+  id         Int    @id @default(autoincrement())
+  name       String @unique
+  gradeLevel Int
+  adviserId  Int?
+  adviser    User?  @relation("SectionAdviser", fields: [adviserId], references: [id], onDelete: SetNull)
+
+  students  Student[]
+  schedules ClassSchedule[]
+}
+
+model Student {
+  id             Int           @id @default(autoincrement())
+  userId         Int           @unique
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  studentNo      String        @unique
+  sectionId      Int
+  section        Section       @relation(fields: [sectionId], references: [id])
+  location       LocationState @default(OFF_CAMPUS)
+  currentRoom    String?
+  lastLat        Float?
+  lastLng        Float?
+  lastSeenAt     DateTime?
+  geofenceActive Boolean       @default(true)
+
+  parents       ParentLink[]
+  gateLogs      GateLog[]
+  attendance    AttendanceRecord[]
+  excuseNotes   ExcuseNote[]
+  alerts        Alert[]
+  interventions Intervention[]
+  messages      Message[]
+}
+
+model ParentLink {
+  id           Int     @id @default(autoincrement())
+  parentId     Int
+  parent       User    @relation(fields: [parentId], references: [id], onDelete: Cascade)
+  studentId    Int
+  student      Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  relationship String  @default("Parent")
+
+  @@unique([parentId, studentId])
+}
+
+model Subject {
+  id        Int    @id @default(autoincrement())
+  code      String @unique
+  name      String
+  teacherId Int
+  teacher   User   @relation(fields: [teacherId], references: [id])
+
+  schedules ClassSchedule[]
+  alerts    Alert[]
+}
+
+model ClassSchedule {
+  id        Int     @id @default(autoincrement())
+  subjectId Int
+  subject   Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  sectionId Int
+  section   Section @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  /// 1 = Monday ... 7 = Sunday
+  dayOfWeek Int
+  /// "HH:mm", 24-hour, school-local time
+  startTime String
+  endTime   String
+  room      String
+
+  attendance AttendanceRecord[]
+}
+
+model Geofence {
+  id           Int    @id @default(autoincrement())
+  name         String
+  centerLat    Float
+  centerLng    Float
+  radiusMeters Int
+}
+
+model GateLog {
+  id        Int       @id @default(autoincrement())
+  studentId Int
+  student   Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  event     GateEvent
+  timestamp DateTime  @default(now())
+  lat       Float?
+  lng       Float?
+  verified  Boolean   @default(true)
+  gate      String    @default("Main Gate")
+
+  @@index([studentId, timestamp])
+}
+
+model AttendanceRecord {
+  id              Int              @id @default(autoincrement())
+  studentId       Int
+  student         Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  scheduleId      Int
+  schedule        ClassSchedule    @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  date            DateTime         @db.Date
+  status          AttendanceStatus
+  locationAtCheck LocationState?
+  markedById      Int?
+  markedBy        User?            @relation("MarkedBy", fields: [markedById], references: [id], onDelete: SetNull)
+  markedAt        DateTime         @default(now())
+  note            String?
+
+  @@unique([studentId, scheduleId, date])
+  @@index([date])
+}
+
+model ExcuseNote {
+  id             Int          @id @default(autoincrement())
+  studentId      Int
+  student        Student      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  submittedById  Int
+  submittedBy    User         @relation("ExcuseSubmitter", fields: [submittedById], references: [id], onDelete: Cascade)
+  date           DateTime     @db.Date
+  reason         String       @db.Text
+  attachmentName String?
+  status         ExcuseStatus @default(PENDING)
+  reviewedById   Int?
+  reviewedBy     User?        @relation("ExcuseReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  createdAt      DateTime     @default(now())
+}
+
+model Alert {
+  id           Int       @id @default(autoincrement())
+  studentId    Int
+  student      Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  raisedById   Int?
+  raisedBy     User?     @relation("AlertRaisedBy", fields: [raisedById], references: [id], onDelete: SetNull)
+  subjectId    Int?
+  subject      Subject?  @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  type         AlertType
+  message      String    @db.Text
+  acknowledged Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+}
+
+model Intervention {
+  id          Int                 @id @default(autoincrement())
+  studentId   Int
+  student     Student             @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  adviserId   Int
+  adviser     User                @relation(fields: [adviserId], references: [id], onDelete: Cascade)
+  date        DateTime            @default(now())
+  actionTaken String
+  notes       String?             @db.Text
+  outcome     InterventionOutcome
+}
+
+model Message {
+  id          Int       @id @default(autoincrement())
+  senderId    Int
+  sender      User      @relation("Sender", fields: [senderId], references: [id], onDelete: Cascade)
+  recipientId Int
+  recipient   User      @relation("Recipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  /// The student the conversation is about, if any
+  studentId   Int?
+  student     Student?  @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  body        String    @db.Text
+  createdAt   DateTime  @default(now())
+  readAt      DateTime?
+}

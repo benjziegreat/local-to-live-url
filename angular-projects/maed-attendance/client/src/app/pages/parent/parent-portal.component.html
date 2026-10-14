@@ -1,0 +1,156 @@
+@if (data(); as d) {
+  <div class="page">
+    <div class="page-head">
+      <div>
+        <p class="eyebrow">Parent portal · {{ d.child.section }}</p>
+        <h1>{{ d.child.firstName }}'s day</h1>
+        <p>Last seen {{ d.child.lastSeenAt ? (d.child.lastSeenAt | date: 'MMM d, h:mm a') : '—' }}</p>
+      </div>
+      @if (children().length > 1) {
+        <label class="field child-pick">
+          <span>Child</span>
+          <select class="input" [ngModel]="childId()" (ngModelChange)="selectChild($event)">
+            @for (c of children(); track c.id) { <option [ngValue]="c.id">{{ c.name }}</option> }
+          </select>
+        </label>
+      }
+    </div>
+
+    <div class="layout">
+      <!-- Tracking: map + child -->
+      <section class="card tracking">
+        <app-geo-map class="map" [geofence]="d.geofence" [marker]="marker()" [inside]="onCampus()" />
+        <div class="child">
+          <app-avatar [name]="d.child.name" [hue]="d.child.avatarHue" [size]="56" />
+          <div>
+            <span class="eyebrow">Child</span>
+            <h2>{{ d.child.name }}</h2>
+          </div>
+        </div>
+        <div class="status" [class]="LOCATION_TONE[d.child.location]">
+          <span class="muted">Status:</span>
+          <strong>{{ onCampus() ? 'On campus' : 'Outside campus' }}</strong>
+          @if (d.child.currentRoom) { <small>· {{ d.child.currentRoom }}</small> }
+        </div>
+      </section>
+
+      <!-- Entry / exit logs -->
+      <section class="card" id="logs">
+        <div class="card-title">
+          <h2><app-icon name="clock" /> Real-time entry / exit logs</h2>
+          <span class="badge info dot pulse">Live</span>
+        </div>
+        <ol class="timeline">
+          @for (g of d.gateLogs; track g.id) {
+            <li [class.exit]="g.event === 'EXIT'">
+              <span class="node"><app-icon [name]="g.event === 'ENTRY' ? 'pin' : 'logout'" [size]="14" /></span>
+              <div class="entry glass">
+                <strong>{{ g.event === 'ENTRY' ? 'Arrival at' : 'Departure from' }} {{ g.gate }}: {{ g.timestamp | date: 'h:mm a' }}</strong>
+                <small>
+                  {{ g.timestamp | date: 'EEE, MMM d' }}
+                  @if (g.verified) { · <span class="ok">Verified by geofence</span> }
+                </small>
+              </div>
+            </li>
+          } @empty {
+            <li class="empty">No gate activity recorded yet.</li>
+          }
+        </ol>
+      </section>
+
+      <!-- Alerts + messages -->
+      <div class="side">
+        <section class="card" id="alerts">
+          <div class="card-title"><h2><app-icon name="bell" /> Alerts</h2></div>
+          <ul class="list">
+            @for (a of d.absences.slice(0, 3); track a.id) {
+              <li class="alert-card" [class.cut]="a.status === 'CUTTING'">
+                <app-icon name="alert" [size]="22" />
+                <div>
+                  <strong>{{ a.status === 'CUTTING' ? 'Left class during' : 'Unexcused absence detected in' }} {{ a.subject }}</strong>
+                  <small>{{ a.date | date: 'EEE, MMM d' }} · {{ to12h(a.startTime) }}</small>
+                </div>
+              </li>
+            }
+            @for (a of d.alerts.slice(0, 2); track a.id) {
+              <li class="alert-card info">
+                <app-icon name="bell" [size]="22" />
+                <div>
+                  <strong>{{ a.message }}</strong>
+                  <small>{{ a.createdAt | date: 'MMM d, h:mm a' }}{{ a.subject ? ' · ' + a.subject : '' }}</small>
+                </div>
+              </li>
+            }
+            @if (!d.absences.length && !d.alerts.length) {
+              <li class="alert-card ok">
+                <app-icon name="check-circle" [size]="22" />
+                <div><strong>All clear</strong><small>No absences or alerts in the last 14 days.</small></div>
+              </li>
+            }
+          </ul>
+        </section>
+
+        <section class="card" id="messages">
+          <div class="card-title">
+            <h2><app-icon name="message" /> Message from adviser</h2>
+            @if (d.unreadFromAdviser) { <span class="badge critical">{{ d.unreadFromAdviser }} new</span> }
+          </div>
+          @if (d.latestMessage) {
+            <blockquote class="preview">
+              <p>{{ d.latestMessage.body }}</p>
+              <small class="muted">{{ d.adviser?.name }} · {{ d.latestMessage.createdAt | date: 'MMM d, h:mm a' }}</small>
+            </blockquote>
+          } @else {
+            <p class="muted small">No messages yet{{ d.adviser ? ' from ' + d.adviser.name : '' }}.</p>
+          }
+          <div class="stack">
+            <button class="btn primary block" type="button" (click)="chatOpen.set(true)" [disabled]="!d.adviser">
+              <app-icon name="message" /> Open direct message
+            </button>
+            <button class="btn block" type="button" (click)="excuseOpen.set(true)">
+              <app-icon name="upload" /> Submit excuse note
+            </button>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <!-- Health summary -->
+    <section class="card health">
+      <app-donut-chart [value]="d.health.rate" caption="Attendance" />
+      <div>
+        <div class="card-title"><h2><app-icon name="chart" /> Attendance health (90 days)</h2></div>
+        <dl class="stats">
+          <div><dt>Present</dt><dd>{{ d.health.present }}</dd></div>
+          <div><dt>Late</dt><dd>{{ d.health.late }}</dd></div>
+          <div><dt>Absent days</dt><dd>{{ d.health.unexcusedAbsences }}</dd></div>
+          <div><dt>Cutting</dt><dd>{{ d.health.cutting }}</dd></div>
+          <div><dt>Excused</dt><dd>{{ d.health.excused }}</dd></div>
+        </dl>
+        @if (d.excuseNotes.length) {
+          <p class="eyebrow notes-title">Recent excuse notes</p>
+          <ul class="list">
+            @for (n of d.excuseNotes.slice(0, 3); track n.id) {
+              <li class="list-item">
+                <small class="grow">{{ n.date | date: 'MMM d' }} — {{ n.reason }}</small>
+                <span class="badge" [class]="n.status === 'APPROVED' ? 'success' : n.status === 'REJECTED' ? 'critical' : 'warning'">{{ titleCase(n.status) }}</span>
+              </li>
+            }
+          </ul>
+        }
+      </div>
+    </section>
+  </div>
+
+  <app-modal [title]="'Message ' + (d.adviser?.name || 'adviser')" [open]="chatOpen()" (closed)="closeChat()">
+    @if (chatOpen() && d.adviser) { <app-chat [withUserId]="d.adviser.id" [studentId]="d.child.id" /> }
+  </app-modal>
+
+  <app-modal [title]="'Excuse note for ' + d.child.firstName" [open]="excuseOpen()" (closed)="excuseOpen.set(false)">
+    <app-excuse-form [studentId]="d.child.id" (submitted)="onExcuseSubmitted()" />
+  </app-modal>
+} @else if (error()) {
+  <div class="card empty">{{ error() }}</div>
+} @else {
+  <div class="page"><div class="skeleton"></div><div class="skeleton"></div></div>
+}

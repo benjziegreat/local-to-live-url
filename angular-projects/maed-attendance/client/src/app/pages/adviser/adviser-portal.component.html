@@ -1,0 +1,243 @@
+<div class="page">
+  <div class="page-head">
+    <div>
+      <p class="eyebrow">Adviser · {{ overview()?.sections?.[0]?.name || 'Advisory class' }}</p>
+      <h1>Data &amp; Intervention Dashboard</h1>
+      <p>Risk is computed from the last {{ overview()?.windowDays || 60 }} days of attendance.</p>
+    </div>
+    <button class="btn primary" type="button" (click)="openIntervention()"><app-icon name="plus" /> Log new intervention</button>
+  </div>
+
+  <!-- Overview widget -->
+  @if (overview(); as o) {
+    <div class="overview">
+      <button type="button" class="card tile safe" [class.on]="riskFilter() === 'SAFE'" (click)="toggleRisk('SAFE')">
+        <app-icon name="check-circle" [size]="22" />
+        <span class="kpi">{{ o.counts.SAFE }}</span><span>Safe <small>(green)</small></span>
+      </button>
+      <button type="button" class="card tile moderate" [class.on]="riskFilter() === 'MODERATE'" (click)="toggleRisk('MODERATE')">
+        <app-icon name="alert" [size]="22" />
+        <span class="kpi">{{ o.counts.MODERATE }}</span><span>Moderate <small>(yellow)</small></span>
+      </button>
+      <button type="button" class="card tile critical" [class.on]="riskFilter() === 'CRITICAL'" (click)="toggleRisk('CRITICAL')">
+        <app-icon name="shield" [size]="22" />
+        <span class="kpi">{{ o.counts.CRITICAL }}</span><span>Critical <small>(red)</small></span>
+      </button>
+    </div>
+  } @else if (error()) {
+    <div class="card empty">{{ error() }}</div>
+  } @else {
+    <div class="skeleton"></div>
+  }
+
+  <div class="grid grid-main">
+    <!-- Risk profiles -->
+    <section class="card" id="risk">
+      <div class="card-title">
+        <h2><app-icon name="shield" /> Attendance / dropout risk profiles</h2>
+        @if (riskFilter()) {
+          <button class="btn ghost sm" type="button" (click)="riskFilter.set(null)">Show all <app-icon name="x" [size]="14" /></button>
+        }
+      </div>
+      <ul class="list">
+        @for (p of profiles(); track p.id) {
+          <li class="list-item profile" [class]="'risk-' + p.risk.toLowerCase()">
+            <app-avatar [name]="p.name" [hue]="p.avatarHue" [size]="44" />
+            <div class="info">
+              <div class="row-wrap">
+                <strong>{{ p.name }}</strong>
+                <span class="badge" [class]="RISK_TONE[p.risk]">Risk: {{ titleCase(p.risk) }}</span>
+                <span class="badge dot" [class]="LOCATION_TONE[p.location]">{{ LOCATION_LABEL[p.location] }}</span>
+              </div>
+              <div class="metrics">
+                <span>Unexcused absences: <b>{{ p.stats.unexcusedAbsences }}</b></span>
+                <span>Cutting rate: <b [class.bad]="p.stats.cuttingRate >= 10">{{ p.stats.cuttingRate }}%</b></span>
+                <span>Attendance: <b>{{ p.stats.rate }}%</b></span>
+                @if (p.lastIntervention) {
+                  <span class="muted">Last action: {{ p.lastIntervention.actionTaken }} ({{ p.lastIntervention.date | date: 'MMM d' }})</span>
+                }
+              </div>
+            </div>
+            <div class="btns">
+              <button class="btn primary sm" type="button" (click)="openIntervention(p)">Log intervention</button>
+              <button class="btn sm" type="button" (click)="openHistory(p)">Communication history</button>
+            </div>
+          </li>
+        } @empty {
+          <li class="empty">No students in this risk group.</li>
+        }
+      </ul>
+    </section>
+
+    <div class="side">
+      <!-- Alerts inbox -->
+      <section class="card" id="alerts">
+        <div class="card-title">
+          <h2><app-icon name="bell" /> Teacher alerts</h2>
+          <span class="badge" [class.critical]="alerts().length">{{ alerts().length }}</span>
+        </div>
+        <ul class="list">
+          @for (a of alerts(); track a.id) {
+            <li class="list-item alert">
+              <div class="grow">
+                <div class="row-wrap">
+                  <span class="badge" [class]="a.type === 'EARLY_WARNING' ? 'warning' : 'critical'">{{ ALERT_LABEL[a.type] }}</span>
+                  <small class="muted">{{ a.createdAt | date: 'MMM d, h:mm a' }}</small>
+                </div>
+                <strong>{{ a.student }}</strong>
+                <p>{{ a.message }}</p>
+                <small class="muted">{{ a.raisedBy }}{{ a.subject ? ' · ' + a.subject : '' }}</small>
+              </div>
+              <div class="stack">
+                <button class="btn sm" type="button" (click)="openHistory({ id: a.studentId! }, 'alerts')">Open</button>
+                <button class="btn ghost sm" type="button" (click)="ack(a)">Dismiss</button>
+              </div>
+            </li>
+          } @empty {
+            <li class="empty">No open alerts. 🎉</li>
+          }
+        </ul>
+      </section>
+
+      <!-- Pending excuse notes -->
+      <section class="card">
+        <div class="card-title"><h2><app-icon name="file" /> Excuse notes to review</h2></div>
+        <ul class="list">
+          @for (n of excuses(); track n.id) {
+            <li class="list-item excuse">
+              <div class="grow">
+                <strong>{{ n.student }}</strong>
+                <small class="muted">Absent {{ n.date | date: 'EEE, MMM d' }} · by {{ n.submittedBy }}</small>
+                <p>{{ n.reason }}</p>
+                @if (n.attachmentName) { <small class="attach"><app-icon name="file" [size]="12" /> {{ n.attachmentName }}</small> }
+              </div>
+              <div class="row">
+                <button class="btn success sm" type="button" (click)="decide(n, 'APPROVED')">Approve</button>
+                <button class="btn ghost sm" type="button" (click)="decide(n, 'REJECTED')">Reject</button>
+              </div>
+            </li>
+          } @empty {
+            <li class="empty">Nothing pending.</li>
+          }
+        </ul>
+      </section>
+    </div>
+  </div>
+
+  <div class="grid grid-2">
+    <!-- Intervention log -->
+    <section class="card" id="interventions">
+      <div class="card-title"><h2><app-icon name="history" /> Intervention log</h2></div>
+      <div class="table-wrap log">
+        <table class="table stacked">
+          <thead><tr><th>Date</th><th>Student</th><th>Action taken</th><th>Conducted by</th><th>Status</th></tr></thead>
+          <tbody>
+            @for (i of interventions(); track i.id) {
+              <tr>
+                <td data-label="Date">{{ i.date | date: 'MM/dd/yy' }}</td>
+                <td data-label="Student">{{ i.student }}</td>
+                <td data-label="Action" [attr.title]="i.notes">{{ i.actionTaken }}</td>
+                <td data-label="By">{{ i.conductedBy }}</td>
+                <td data-label="Status"><span class="badge dot" [class]="OUTCOME_TONE[i.outcome]">{{ OUTCOME_LABEL[i.outcome] }}</span></td>
+              </tr>
+            } @empty {
+              <tr><td colspan="5" class="empty">No interventions logged yet.</td></tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Analytics -->
+    <section class="card" id="analytics">
+      <div class="card-title"><h2><app-icon name="chart" /> Aggregated attendance history</h2></div>
+      <p class="muted small">Daily attendance rate across your advisory class, last 26 weeks.</p>
+      @if (heatmap(); as h) {
+        <app-heatmap [days]="h.days" [from]="h.from" [to]="h.to" />
+      } @else {
+        <div class="skeleton"></div>
+      }
+    </section>
+  </div>
+</div>
+
+<!-- Log intervention -->
+<app-modal title="Log new intervention" [open]="interventionOpen()" (closed)="interventionOpen.set(false)">
+  <form class="stack" (ngSubmit)="saveIntervention()">
+    <label class="field">
+      <span>Student</span>
+      <select class="input" name="student" [(ngModel)]="form.studentId">
+        @for (s of overview()?.students ?? []; track s.id) {
+          <option [ngValue]="s.id">{{ s.name }} — {{ titleCase(s.risk) }}</option>
+        }
+      </select>
+    </label>
+    <label class="field">
+      <span>Action taken</span>
+      <input class="input" name="action" list="actions" [(ngModel)]="form.actionTaken" required />
+      <datalist id="actions">@for (a of ACTIONS; track a) { <option [value]="a"></option> }</datalist>
+    </label>
+    <label class="field">
+      <span>Notes</span>
+      <textarea class="input" name="notes" [(ngModel)]="form.notes" placeholder="What was discussed, agreements, next steps…"></textarea>
+    </label>
+    <fieldset class="outcomes">
+      <legend>Status</legend>
+      @for (o of OUTCOMES; track o) {
+        <label class="outcome" [class]="OUTCOME_TONE[o]" [class.on]="form.outcome === o">
+          <input type="radio" name="outcome" [value]="o" [(ngModel)]="form.outcome" />
+          {{ OUTCOME_LABEL[o] }}
+        </label>
+      }
+    </fieldset>
+    <button class="btn primary block" type="submit" [disabled]="!form.actionTaken.trim()">Save intervention</button>
+  </form>
+</app-modal>
+
+<!-- Communication history -->
+<app-modal [title]="'Communication history — ' + (history()?.student?.name || '')" [open]="!!history()" (closed)="closeHistory()" [width]="640">
+  @if (history(); as h) {
+    <div class="tabs" role="tablist">
+      <button type="button" role="tab" [class.on]="historyTab() === 'messages'" (click)="historyTab.set('messages')">Parent messages</button>
+      <button type="button" role="tab" [class.on]="historyTab() === 'interventions'" (click)="historyTab.set('interventions')">Interventions ({{ h.interventions.length }})</button>
+      <button type="button" role="tab" [class.on]="historyTab() === 'alerts'" (click)="historyTab.set('alerts')">Alerts ({{ h.alerts.length }})</button>
+    </div>
+
+    @switch (historyTab()) {
+      @case ('messages') {
+        @if (h.parents.length) {
+          @if (h.parents.length > 1) {
+            <select class="input parent-pick" [ngModel]="chatParentId()" (ngModelChange)="chatParentId.set($event)">
+              @for (p of h.parents; track p.id) { <option [ngValue]="p.id">{{ p.name }} ({{ p.relationship }})</option> }
+            </select>
+          } @else {
+            <p class="muted small">Conversation with {{ h.parents[0].name }} ({{ h.parents[0].relationship }})</p>
+          }
+          @if (chatParentId(); as pid) { <app-chat [withUserId]="pid" [studentId]="h.student.id" /> }
+        } @else {
+          <p class="empty">No parent account is linked to this student.</p>
+        }
+      }
+      @case ('interventions') {
+        <ul class="list">
+          @for (i of h.interventions; track i.id) {
+            <li class="list-item">
+              <span class="badge dot" [class]="OUTCOME_TONE[i.outcome]">{{ OUTCOME_LABEL[i.outcome] }}</span>
+              <div class="grow"><strong>{{ i.actionTaken }}</strong><small class="muted">{{ i.date | date: 'MMM d, y' }}{{ i.notes ? ' — ' + i.notes : '' }}</small></div>
+            </li>
+          } @empty { <li class="empty">No interventions yet.</li> }
+        </ul>
+      }
+      @case ('alerts') {
+        <ul class="list">
+          @for (a of h.alerts; track a.id) {
+            <li class="list-item">
+              <span class="badge" [class]="a.type === 'EARLY_WARNING' ? 'warning' : 'critical'">{{ ALERT_LABEL[a.type] }}</span>
+              <div class="grow"><strong>{{ a.message }}</strong><small class="muted">{{ a.raisedBy }}{{ a.subject ? ' · ' + a.subject : '' }} · {{ a.createdAt | date: 'MMM d, h:mm a' }}</small></div>
+            </li>
+          } @empty { <li class="empty">No alerts on record.</li> }
+        </ul>
+      }
+    }
+  }
+</app-modal>
