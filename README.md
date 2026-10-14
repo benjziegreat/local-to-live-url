@@ -27,10 +27,10 @@ npm start        # listens on http://localhost:3050
 # Terminal 2 — frontend (admin dashboard)
 cd frontend
 npm install
-npm start         # ng serve on http://localhost:4200, proxies /api to the backend
+npm start         # ng serve on http://localhost:5089, proxies /api to the backend
 ```
 
-Open http://localhost:4200 and pick a tab:
+Open http://localhost:5089 and pick a tab:
 
 - **Tunnel Admin**: enter the local HTTPS server address (e.g. `https://localhost/PMS/`) and click **Start Tunnel**. Once cloudflared reports its assigned URL, the dashboard shows the public link and a QR code.
 - **Tunnel to DNS url**: up to five independent rows, each with its own local HTTPS server and subdomain field. Click **Start Tunnel** on a row; if that subdomain has no named tunnel yet, one is created and DNS-routed automatically. The public URL for that row is `https://<subdomain>`.

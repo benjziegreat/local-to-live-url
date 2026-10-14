@@ -1,6 +1,6 @@
 const { execSync } = require('node:child_process');
 
-const PORT = Number(process.env.PORT) || 4200;
+const PORT = Number(process.env.PORT) || 5089;
 
 function findWindowsPids(port) {
   const out = execSync('netstat -ano', { encoding: 'utf8' });
