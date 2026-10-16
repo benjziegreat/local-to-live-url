@@ -48,9 +48,9 @@ export class GeoMapComponent implements AfterViewInit, OnDestroy {
       scrollWheelZoom: false,
     }).setView([fence.centerLat, fence.centerLng], 16);
 
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
-      attribution: '&copy; OpenStreetMap &copy; CARTO',
+      attribution: '&copy; OpenStreetMap contributors',
     }).addTo(this.map);
     L.control.zoom({ position: 'bottomright' }).addTo(this.map);
 

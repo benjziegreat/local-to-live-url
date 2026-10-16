@@ -195,8 +195,11 @@ a { color: var(--brand); }
 
 /* ---- Layout helpers ------------------------------------------------------- */
 
+/* Grid containers use minmax(0, 1fr) so long content wraps/ellipsizes inside
+   its card instead of stretching the column past the card edge. */
 .page {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
 }
 
@@ -227,7 +230,7 @@ a { color: var(--brand); }
 .row { display: flex; align-items: center; gap: 10px; }
 .row-wrap { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .spacer { flex: 1; }
-.stack { display: grid; gap: 10px; }
+.stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
 
 /* ---- Buttons --------------------------------------------------------------- */
 
@@ -409,6 +412,7 @@ textarea.input { min-height: 96px; resize: vertical; }
   margin: 0;
   padding: 0;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
 }
 
@@ -416,6 +420,7 @@ textarea.input { min-height: 96px; resize: vertical; }
   display: flex;
   align-items: center;
   gap: 12px;
+  min-width: 0;
   padding: 10px 12px;
   border-radius: var(--radius-sm);
   background: var(--glass-strong);
