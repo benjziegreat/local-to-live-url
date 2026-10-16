@@ -1,10 +1,19 @@
 const { spawn, execFileSync } = require('node:child_process');
+const { isIP } = require('node:net');
 
 const MAX_LOG_LINES = 200;
 const ASSUME_RUNNING_AFTER_MS = 6000;
 const REGISTERED_RE = /Registered tunnel connection/i;
 const SLOT_COUNT = 5;
 const HOSTNAME_RE = /^(?=.{1,253}$)(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))+$/i;
+
+// True for a dotted DNS name such as intekn.base44.app; false for localhost,
+// *.localhost, single-label machine names and IP literals.
+function isPublicHostname(hostname) {
+  const h = hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (isIP(h) || !h.includes('.')) return false;
+  return h !== 'localhost' && !h.endsWith('.localhost') && !h.endsWith('.local');
+}
 
 function cloudflaredTunnelExists(name) {
   try {
@@ -119,6 +128,12 @@ class DnsTunnelSlot {
       // Local dev HTTPS servers commonly use self-signed certs; cloudflared
       // refuses to proxy to them unless certificate verification is disabled.
       args.push('--no-tls-verify');
+    }
+    if (isPublicHostname(parsedLocal.hostname)) {
+      // Remote origins (e.g. https://intekn.base44.app/) route by Host/SNI and
+      // reject requests carrying the tunnel's hostname, so present the
+      // origin's own hostname instead.
+      args.push('--http-host-header', parsedLocal.host, '--origin-server-name', parsedLocal.hostname);
     }
     args.push('run', host);
 
