@@ -5,6 +5,7 @@
   "description": "Root scripts to build and run the frontend and backend together.",
   "scripts": {
     "build": "npm run build --prefix frontend",
+    "package": "node scripts/package.js",
     "start": "npm run build --prefix frontend && concurrently -n backend,frontend -c blue,green \"npm run start --prefix server\" \"npm run start --prefix frontend\"",
     "stop": "node scripts/stop.js"
   },

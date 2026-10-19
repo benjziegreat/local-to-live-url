@@ -1,8 +1,20 @@
+@if (!auth.isAuthenticated()) {
+  <app-login />
+} @else {
 <div class="min-h-screen bg-slate-50 text-slate-900">
   <div class="mx-auto max-w-2xl px-4 py-10 sm:py-16">
-    <header class="mb-6">
-      <h1 class="text-2xl font-semibold tracking-tight">Tunnel Admin Dashboard</h1>
-      <p class="mt-1 text-sm text-slate-500">Reach a local server from a phone or anywhere, no router or LAN configuration required.</p>
+    <header class="mb-6 flex items-start justify-between gap-4">
+      <div>
+        <h1 class="text-2xl font-semibold tracking-tight">Tunnel Admin Dashboard</h1>
+        <p class="mt-1 text-sm text-slate-500">Reach a local server from a phone or anywhere, no router or LAN configuration required.</p>
+      </div>
+      <button
+        type="button"
+        (click)="signOut()"
+        class="shrink-0 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100"
+      >
+        Sign out
+      </button>
     </header>
 
     <div class="mb-8 flex gap-1 rounded-lg border border-slate-200 bg-slate-100 p-1">
@@ -37,3 +49,4 @@
     }
   </div>
 </div>
+}
