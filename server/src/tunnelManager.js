@@ -1,4 +1,5 @@
 const { spawn } = require('node:child_process');
+const cloudflared = require('./cloudflared');
 
 const TRYCLOUDFLARE_URL_RE = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/i;
 const MAX_LOG_LINES = 200;
@@ -55,6 +56,9 @@ class TunnelManager {
       throw Object.assign(new Error('localUrl must use http or https'), { statusCode: 400 });
     }
 
+    // Quick tunnels need no Cloudflare login, only the binary (throws 412 if missing).
+    const bin = cloudflared.binaryPath();
+
     this.reset();
     this.status = 'starting';
     this.localUrl = parsed.toString();
@@ -69,7 +73,7 @@ class TunnelManager {
 
     let child;
     try {
-      child = spawn('cloudflared', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     } catch (err) {
       this.status = 'error';
       this.error = `Failed to launch cloudflared: ${err.message}`;

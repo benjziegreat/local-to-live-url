@@ -40,12 +40,32 @@
       >
         Tunnel to DNS url
       </button>
+      <button
+        type="button"
+        (click)="selectTab('setup')"
+        class="flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors"
+        [class.bg-white]="activeTab() === 'setup'"
+        [class.shadow-sm]="activeTab() === 'setup'"
+        [class.text-slate-900]="activeTab() === 'setup'"
+        [class.text-slate-500]="activeTab() !== 'setup'"
+      >
+        Cloudflare setup
+      </button>
     </div>
+
+    @if (setupWarning(); as warning) {
+      <div class="mb-6 flex flex-wrap items-center gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+        <span class="flex-1">{{ warning }}</span>
+        <button type="button" (click)="selectTab('setup')" class="font-medium underline">Open Cloudflare setup</button>
+      </div>
+    }
 
     @if (activeTab() === 'cloudflare') {
       <app-tunnel-admin />
-    } @else {
+    } @else if (activeTab() === 'public-ip') {
       <app-public-ip-tunnel />
+    } @else {
+      <app-cloudflare-setup />
     }
   </div>
 </div>

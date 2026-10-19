@@ -51,16 +51,32 @@ for (const file of fs.readdirSync(path.join(root, 'packaging'))) {
   fs.copyFileSync(path.join(root, 'packaging', file), path.join(target, file));
 }
 
+// True when every runtime dependency in the target actually loads (catches a
+// half-copied or otherwise damaged node_modules, not just a missing one).
+function depsLoad() {
+  const deps = Object.keys(JSON.parse(fs.readFileSync(path.join(target, 'package.json'), 'utf8')).dependencies || {});
+  const check = spawnSync(process.execPath, ['-e', deps.map((d) => `require(${JSON.stringify(d)})`).join(';')], {
+    cwd: target,
+    stdio: 'ignore',
+  });
+  return check.status === 0;
+}
+
 const depsChanged =
   oldPkg !== readIfExists(path.join(target, 'package.json')) ||
-  oldLock !== readIfExists(path.join(target, 'package-lock.json')) ||
-  !fs.existsSync(path.join(target, 'node_modules'));
+  oldLock !== readIfExists(path.join(target, 'package-lock.json'));
 
-if (depsChanged) {
-  console.log('Dependencies changed, installing production packages...');
-  run('npm', ['install', '--omit=dev', '--no-audit', '--no-fund'], target);
+if (depsChanged || !depsLoad()) {
+  console.log(depsChanged ? 'Dependencies changed' : 'node_modules is missing or damaged', '- reinstalling production packages...');
+  fs.rmSync(path.join(target, 'node_modules'), { recursive: true, force: true });
+  const hasLock = fs.existsSync(path.join(target, 'package-lock.json'));
+  run('npm', [hasLock ? 'ci' : 'install', '--omit=dev', '--no-audit', '--no-fund'], target);
+  if (!depsLoad()) {
+    console.error('Dependencies still fail to load after reinstall.');
+    process.exit(1);
+  }
 } else {
-  console.log('Dependencies unchanged, skipping npm install.');
+  console.log('Dependencies unchanged and loading fine, skipping npm install.');
 }
 
 console.log(`\nbuild-app updated: ${target}`);

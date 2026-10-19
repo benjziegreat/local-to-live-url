@@ -3,6 +3,7 @@ const path = require('node:path');
 const express = require('express');
 const cors = require('cors');
 const auth = require('./auth');
+const cloudflared = require('./cloudflared');
 const tunnelManager = require('./tunnelManager');
 const dnsTunnelManager = require('./dnsTunnelManager');
 
@@ -67,6 +68,38 @@ app.post('/api/dns-tunnel/:id/stop', (req, res) => {
     res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
+
+// Wraps a cloudflared setup action and responds with the refreshed setup status.
+function setupAction(action) {
+  return (req, res) => {
+    try {
+      const result = action(req) ?? null;
+      res.json({ ...cloudflared.getStatus(), result });
+    } catch (err) {
+      res.status(err.statusCode || 500).json({ error: err.message });
+    }
+  };
+}
+
+app.get('/api/cloudflare/status', (req, res) => {
+  res.json(cloudflared.getStatus({ refresh: req.query.refresh === '1' }));
+});
+app.post('/api/cloudflare/install', setupAction(() => cloudflared.startInstall()));
+app.post('/api/cloudflare/uninstall', setupAction(() => {
+  const busy = (s) => s.status === 'starting' || s.status === 'running';
+  if (busy(tunnelManager.getStatus()) || dnsTunnelManager.getAllStatus().some(busy)) {
+    throw Object.assign(new Error('Stop all running tunnels before uninstalling cloudflared.'), { statusCode: 409 });
+  }
+  cloudflared.uninstall();
+}));
+app.post('/api/cloudflare/use-system', setupAction(() => cloudflared.useSystemBinary()));
+app.post('/api/cloudflare/profiles/:name/logout', setupAction((req) => cloudflared.logout(req.params.name)));
+app.post('/api/cloudflare/profiles', setupAction((req) => cloudflared.createProfile(req.body?.name)));
+app.delete('/api/cloudflare/profiles/:name', setupAction((req) => cloudflared.deleteProfile(req.params.name)));
+app.post('/api/cloudflare/profiles/:name/activate', setupAction((req) => cloudflared.setActiveProfile(req.params.name)));
+app.post('/api/cloudflare/profiles/:name/login', setupAction((req) => cloudflared.startLogin(req.params.name)));
+app.put('/api/cloudflare/profiles/:name/cert', setupAction((req) => cloudflared.importCert(req.params.name, req.body?.pem)));
+app.post('/api/cloudflare/login/cancel', setupAction(() => cloudflared.cancelLogin()));
 
 // In a packaged build the compiled dashboard sits in ../public; serve it from the same port.
 const publicDir = path.join(__dirname, '..', 'public');

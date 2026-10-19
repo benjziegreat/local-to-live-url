@@ -1,5 +1,8 @@
 const { spawn, execFileSync } = require('node:child_process');
+const fs = require('node:fs');
+const path = require('node:path');
 const { isIP } = require('node:net');
+const cloudflared = require('./cloudflared');
 
 const MAX_LOG_LINES = 200;
 const ASSUME_RUNNING_AFTER_MS = 6000;
@@ -15,9 +18,13 @@ function isPublicHostname(hostname) {
   return h !== 'localhost' && !h.endsWith('.localhost') && !h.endsWith('.local');
 }
 
-function cloudflaredTunnelExists(name) {
+function runCloudflared(ctx, args) {
+  return execFileSync(ctx.bin, args, { env: ctx.env, stdio: ['ignore', 'pipe', 'pipe'] });
+}
+
+function cloudflaredTunnelExists(ctx, name) {
   try {
-    execFileSync('cloudflared', ['tunnel', 'info', name], { stdio: 'ignore' });
+    runCloudflared(ctx, ['tunnel', 'info', name]);
     return true;
   } catch {
     return false;
@@ -102,6 +109,9 @@ class DnsTunnelSlot {
       throw Object.assign(new Error('Cloudflared subdomain must be a valid hostname, e.g. cjcshell.intekn-app.com'), { statusCode: 400 });
     }
 
+    // Throws a 412 asking the user to install cloudflared / log in to Cloudflare.
+    const ctx = cloudflared.activeContext();
+
     this.reset();
     this.status = 'starting';
     this.localUrl = parsedLocal.toString();
@@ -109,13 +119,29 @@ class DnsTunnelSlot {
     this.publicUrl = `https://${host}`;
     this.startedAt = new Date().toISOString();
 
+    // The app keeps its own credentials file per tunnel, so a tunnel created on
+    // another machine (or under another login) can be fetched and run here.
+    const credFile = path.join(ctx.credDir, `${host}.json`);
+    let useCredFile = true;
+
     try {
-      if (!cloudflaredTunnelExists(host)) {
-        this._pushLog(`No named tunnel "${host}" found — creating it.`);
-        execFileSync('cloudflared', ['tunnel', 'create', host], { stdio: ['ignore', 'pipe', 'pipe'] });
+      if (!cloudflaredTunnelExists(ctx, host)) {
+        this._pushLog(`No named tunnel "${host}" found in Cloudflare profile "${ctx.profile}" — creating it.`);
+        fs.rmSync(credFile, { force: true });
+        runCloudflared(ctx, ['tunnel', 'create', '--credentials-file', credFile, host]);
+      } else if (!fs.existsSync(credFile)) {
+        this._pushLog(`Fetching credentials for existing tunnel "${host}".`);
+        try {
+          runCloudflared(ctx, ['tunnel', 'token', '--cred-file', credFile, host]);
+        } catch (err) {
+          // Tunnels created before cloudflared 2022.3 can't be fetched; fall back
+          // to whatever credentials file cloudflared finds on its own.
+          useCredFile = false;
+          this._pushLog(`Could not fetch tunnel credentials, using cloudflared defaults: ${err.stderr ? err.stderr.toString().trim() : err.message}`);
+        }
       }
       this._pushLog(`Routing DNS for "${host}" to this tunnel.`);
-      execFileSync('cloudflared', ['tunnel', 'route', 'dns', '--overwrite-dns', host, host], { stdio: ['ignore', 'pipe', 'pipe'] });
+      runCloudflared(ctx, ['tunnel', 'route', 'dns', '--overwrite-dns', host, host]);
     } catch (err) {
       this.status = 'error';
       const detail = err.stderr ? err.stderr.toString().trim() : err.message;
@@ -135,11 +161,12 @@ class DnsTunnelSlot {
       // origin's own hostname instead.
       args.push('--http-host-header', parsedLocal.host, '--origin-server-name', parsedLocal.hostname);
     }
+    if (useCredFile) args.push('--credentials-file', credFile);
     args.push('run', host);
 
     let child;
     try {
-      child = spawn('cloudflared', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      child = spawn(ctx.bin, args, { env: ctx.env, stdio: ['ignore', 'pipe', 'pipe'] });
     } catch (err) {
       this.status = 'error';
       this.error = `Failed to launch cloudflared: ${err.message}`;
