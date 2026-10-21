@@ -3,3 +3,8 @@ node_modules/
 # Cloudflare logins / tunnel credentials and downloaded cloudflared (never commit)
 server/data/
 server/bin/
+
+# Tray app build output
+desktop/.stage/
+desktop/.out/
+desktop/.dev-data/

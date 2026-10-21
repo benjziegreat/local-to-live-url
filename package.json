@@ -10,6 +10,9 @@
     "stop": "node scripts/stop.js"
   },
   "devDependencies": {
-    "concurrently": "^9.1.2"
+    "@electron/fuses": "2.1.3",
+    "@electron/packager": "20.3.0",
+    "concurrently": "^9.1.2",
+    "electron": "44.5.1"
   }
 }

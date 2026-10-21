@@ -16,7 +16,7 @@ const DATA_DIR = process.env.CLOUDFLARE_DATA_DIR || path.join(APP_ROOT, 'data');
 const PROFILES_DIR = path.join(DATA_DIR, 'profiles');
 const ACTIVE_FILE = path.join(DATA_DIR, 'active-profile.json');
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
-const BIN_DIR = path.join(APP_ROOT, 'bin');
+const BIN_DIR = process.env.CLOUDFLARED_BIN_DIR || path.join(APP_ROOT, 'bin');
 const EXE = process.platform === 'win32' ? 'cloudflared.exe' : 'cloudflared';
 const SYSTEM_PROFILE = 'system';
 const PROFILE_NAME_RE = /^[a-z0-9][a-z0-9_-]{0,31}$/i;
@@ -83,7 +83,7 @@ function findBinary({ refresh = false } = {}) {
   for (const candidate of candidatePaths()) {
     try {
       if (!fs.statSync(candidate.path).isFile()) continue;
-      const version = execFileSync(candidate.path, ['--version'], { encoding: 'utf8', timeout: 10000 }).trim();
+      const version = execFileSync(candidate.path, ['--version'], { encoding: 'utf8', timeout: 10000, windowsHide: true }).trim();
       binaryCache = { ...candidate, version };
       break;
     } catch {
@@ -325,7 +325,7 @@ function startLogin(name) {
   fs.mkdirSync(path.dirname(cert), { recursive: true });
 
   Object.assign(login, { status: 'waiting', profile: name, url: null, error: null });
-  const child = spawn(bin, ['tunnel', 'login'], { env: profileEnv(name), stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(bin, ['tunnel', 'login'], { env: profileEnv(name), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   login.process = child;
 
   const onOutput = (data) => {

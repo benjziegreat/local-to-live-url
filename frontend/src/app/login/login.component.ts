@@ -1,4 +1,4 @@
-import { Component, signal } from '@angular/core';
+import { Component, ElementRef, HostListener, ViewChild, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
 import { AuthService } from '../auth.service';
@@ -15,7 +15,15 @@ export class LoginComponent {
   readonly submitting = signal(false);
   readonly error = signal<string | null>(null);
 
+  @ViewChild('passwordInput') private passwordInput?: ElementRef<HTMLInputElement>;
+
   constructor(readonly auth: AuthService) {}
+
+  // Reopening the tray window (or switching back to the tab) lands in the password field.
+  @HostListener('window:focus')
+  focusPassword(): void {
+    this.passwordInput?.nativeElement.focus();
+  }
 
   submit(): void {
     if (!this.username || !this.password || this.submitting()) return;

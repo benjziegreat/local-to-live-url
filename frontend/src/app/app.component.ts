@@ -1,4 +1,4 @@
-import { Component, effect, signal } from '@angular/core';
+import { Component, NgZone, effect, signal } from '@angular/core';
 import { TunnelAdminComponent } from './tunnel-admin/tunnel-admin.component';
 import { PublicIpTunnelComponent } from './public-ip-tunnel/public-ip-tunnel.component';
 import { LoginComponent } from './login/login.component';
@@ -6,6 +6,7 @@ import { AuthService } from './auth.service';
 import { IdleService } from './idle.service';
 import { CloudflareSetupComponent } from './cloudflare-setup/cloudflare-setup.component';
 import { CloudflareSetupService } from './cloudflare-setup.service';
+import { desktop } from './desktop-bridge';
 
 type TunnelTab = 'cloudflare' | 'public-ip' | 'setup';
 
@@ -21,7 +22,12 @@ const IDLE_LOCK_MS = 60 * 1000;
 export class AppComponent {
   readonly activeTab = signal<TunnelTab>('cloudflare');
 
-  constructor(readonly auth: AuthService, idle: IdleService, readonly setup: CloudflareSetupService) {
+  constructor(
+    readonly auth: AuthService,
+    idle: IdleService,
+    readonly setup: CloudflareSetupService,
+    zone: NgZone,
+  ) {
     effect(() => {
       if (this.auth.isAuthenticated()) {
         idle.start(IDLE_LOCK_MS, () => this.auth.lock('Locked after 1 minute of inactivity.'));
@@ -30,6 +36,13 @@ export class AppComponent {
         idle.stop();
       }
     });
+
+    // Tray app: hiding the window locks the dashboard, so reopening asks for the password.
+    desktop?.onLockRequest(() =>
+      zone.run(() => {
+        if (this.auth.isAuthenticated()) this.auth.lock('Locked when the window was hidden to the tray.', false);
+      })
+    );
   }
 
   selectTab(tab: TunnelTab): void {

@@ -1,6 +1,7 @@
 import { Injectable, computed, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, tap } from 'rxjs';
+import { desktop } from './desktop-bridge';
 
 interface LoginResponse {
   token: string;
@@ -41,8 +42,12 @@ export class AuthService {
     );
   }
 
-  /** Revokes the session on the server and returns to the login screen. */
-  lock(reason: string | null = null): void {
+  /**
+   * Revokes the session on the server and returns to the login screen. In the
+   * tray app this also hides the window, unless the tray app itself asked for
+   * the lock (`notifyDesktop` false).
+   */
+  lock(reason: string | null = null, notifyDesktop = true): void {
     const token = this.token;
     if (token) {
       this.http
@@ -50,6 +55,7 @@ export class AuthService {
         .subscribe({ error: () => {} });
     }
     this.expire(reason);
+    if (notifyDesktop) desktop?.notifyLocked();
   }
 
   /** Clears the local session without contacting the server (e.g. after a 401). */

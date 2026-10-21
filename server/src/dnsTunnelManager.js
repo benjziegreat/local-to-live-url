@@ -19,7 +19,7 @@ function isPublicHostname(hostname) {
 }
 
 function runCloudflared(ctx, args) {
-  return execFileSync(ctx.bin, args, { env: ctx.env, stdio: ['ignore', 'pipe', 'pipe'] });
+  return execFileSync(ctx.bin, args, { env: ctx.env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
 }
 
 function cloudflaredTunnelExists(ctx, name) {
@@ -166,7 +166,7 @@ class DnsTunnelSlot {
 
     let child;
     try {
-      child = spawn(ctx.bin, args, { env: ctx.env, stdio: ['ignore', 'pipe', 'pipe'] });
+      child = spawn(ctx.bin, args, { env: ctx.env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     } catch (err) {
       this.status = 'error';
       this.error = `Failed to launch cloudflared: ${err.message}`;

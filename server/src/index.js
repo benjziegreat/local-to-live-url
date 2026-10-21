@@ -110,6 +110,39 @@ if (fs.existsSync(path.join(publicDir, 'index.html'))) {
   });
 }
 
-app.listen(PORT, () => {
-  console.log(`Tunnel admin server listening on http://localhost:${PORT}`);
-});
+let server = null;
+
+/** Starts listening; resolves with the port, rejects (e.g. EADDRINUSE) if it can't bind. */
+function start(port = PORT) {
+  return new Promise((resolve, reject) => {
+    server = app.listen(port);
+    server.once('listening', () => {
+      console.log(`Tunnel admin server listening on http://localhost:${port}`);
+      server.on('error', (err) => console.error(`Server error: ${err.message}`));
+      resolve(port);
+    });
+    server.once('error', reject);
+  });
+}
+
+/** Stops every tunnel and login process this server started, then closes it. */
+function shutdown() {
+  tunnelManager.stop();
+  dnsTunnelManager.getAllStatus().forEach((slot) => dnsTunnelManager.stop(slot.id));
+  cloudflared.cancelLogin();
+  if (!server) return Promise.resolve();
+  return new Promise((resolve) => {
+    server.close(() => resolve());
+    // Browser keep-alive and in-flight polls would otherwise hold close() open.
+    server.closeAllConnections();
+  });
+}
+
+module.exports = { start, shutdown };
+
+if (require.main === module) {
+  start().catch((err) => {
+    console.error(`Could not start the server: ${err.message}`);
+    process.exit(1);
+  });
+}

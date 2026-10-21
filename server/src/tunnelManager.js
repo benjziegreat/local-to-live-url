@@ -73,7 +73,7 @@ class TunnelManager {
 
     let child;
     try {
-      child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     } catch (err) {
       this.status = 'error';
       this.error = `Failed to launch cloudflared: ${err.message}`;
