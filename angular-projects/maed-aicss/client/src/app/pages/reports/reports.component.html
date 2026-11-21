@@ -1,0 +1,135 @@
+<div class="page">
+  <header class="page-head no-print">
+    <h1><app-icon name="chart" [size]="28" /> Reports</h1>
+  </header>
+
+  <section class="cards no-print">
+    @for (r of reports; track r.type) {
+      <button type="button" class="rcard" [class]="r.tone" [class.on]="selected()?.type === r.type" (click)="choose(r)">
+        <span class="ico"><app-icon [name]="r.icon" [size]="30" /></span>
+        <strong>{{ r.title }}</strong>
+        <small>{{ r.sub }}</small>
+      </button>
+    }
+  </section>
+
+  @if (selected(); as def) {
+    <section class="card options no-print">
+      @if (has('section')) {
+        <label class="field">
+          <span>Section</span>
+          <select class="input" [(ngModel)]="sectionId">
+            @if (def.type !== 'sf2' && def.type !== 'dtr') {
+              <option [ngValue]="null">All sections</option>
+            }
+            @for (s of sections(); track s.id) {
+              <option [ngValue]="s.id">{{ s.name }}</option>
+            }
+          </select>
+        </label>
+      }
+      @if (has('date')) {
+        <label class="field">
+          <span>Date</span>
+          <input class="input" type="date" [(ngModel)]="date" [max]="today" />
+        </label>
+      }
+      @if (has('month')) {
+        <label class="field">
+          <span>Period</span>
+          <select class="input" [(ngModel)]="month">
+            @if (has('year')) {
+              <option value="year">Whole school year</option>
+            }
+            @for (m of months(); track m) {
+              <option [value]="m">{{ monthLabel(m, true) }}</option>
+            }
+          </select>
+        </label>
+      }
+      @if (has('quarter')) {
+        <label class="field">
+          <span>Quarter</span>
+          <select class="input" [(ngModel)]="quarter">
+            <option [ngValue]="null">All quarters</option>
+            @for (q of [1, 2, 3, 4]; track q) {
+              <option [ngValue]="q">Quarter {{ q }}</option>
+            }
+          </select>
+        </label>
+      }
+      @if (has('status')) {
+        <label class="field">
+          <span>Alerts</span>
+          <select class="input" [(ngModel)]="alertStatus">
+            <option value="">Open &amp; followed up</option>
+            <option value="all">All, including resolved</option>
+          </select>
+        </label>
+      }
+      <div class="row-wrap go">
+        <button type="button" class="btn primary" (click)="generate()" [disabled]="loading()"><app-icon name="refresh" [size]="16" /> {{ loading() ? 'Generating…' : 'Generate' }}</button>
+        <button type="button" class="btn" (click)="csv()" [disabled]="!report()"><app-icon name="download" [size]="16" /> CSV / Excel</button>
+        <button type="button" class="btn" (click)="print()" [disabled]="!report()"><app-icon name="printer" [size]="16" /> Print / PDF</button>
+      </div>
+    </section>
+
+    @if (error()) {
+      <div class="card empty">{{ error() }}</div>
+    } @else if (report()) {
+    @let r = report()!;
+      <article class="card sheet" [class.sf2]="r.type === 'sf2' || r.type === 'dtr'" [class.dtr]="r.type === 'dtr'">
+        <header class="sheet-head">
+          <div>
+            <span class="eyebrow">{{ r.school }}</span>
+            <h2>{{ r.title }}</h2>
+            <p>{{ r.subtitle }}</p>
+            @if (r.legend) {
+              <p class="muted small">{{ r.legend }}</p>
+            }
+          </div>
+          <small class="muted">Generated {{ fmtDateTime(r.generatedAt) }}</small>
+        </header>
+        @if (r.summary.length) {
+          <dl class="summary">
+            @for (s of r.summary; track s.label) {
+              <div><dt>{{ s.label }}</dt><dd>{{ s.value }}</dd></div>
+            }
+          </dl>
+        }
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                @for (c of r.columns; track c.key) {
+                  <th [class.num]="c.align === 'right'" [class.center]="c.align === 'center'">
+                    {{ c.label }}@if (c.sub) {<br /><small>{{ c.sub }}</small>}
+                  </th>
+                }
+              </tr>
+            </thead>
+            <tbody>
+              @for (row of r.rows; track $index) {
+                <tr>
+                  @for (c of r.columns; track c.key) {
+                    <td [class.num]="c.align === 'right'" [class.center]="c.align === 'center'" [class.mark-x]="row[c.key] === 'x' || row[c.key] === 'Absent'" [class.mark-l]="row[c.key] === 'L' || isLate(row[c.key])" [class.mark-c]="row[c.key] === 'C'">{{ row[c.key] }}</td>
+                  }
+                </tr>
+              } @empty {
+                <tr><td [attr.colspan]="r.columns.length" class="empty">No data for this report.</td></tr>
+              }
+            </tbody>
+          </table>
+        </div>
+        <footer class="sheet-foot">
+          <div><span>Prepared by</span><b></b></div>
+          <div><span>Noted by</span><b></b></div>
+        </footer>
+      </article>
+    } @else {
+      <div class="skeleton" style="min-height: 300px"></div>
+    }
+  } @else {
+    <p class="card empty no-print">Choose a report above to preview, print or export it.</p>
+  }
+</div>

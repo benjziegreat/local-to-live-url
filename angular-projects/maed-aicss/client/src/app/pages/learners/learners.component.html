@@ -1,0 +1,152 @@
+<div class="page">
+  <header class="page-head">
+    <h1><app-icon name="users" [size]="28" /> Learners</h1>
+    <div class="tools">
+      <button type="button" class="btn" (click)="export()"><app-icon name="download" [size]="16" /> Export</button>
+      @if (auth.isAdmin()) {
+        <button type="button" class="btn primary" (click)="openForm()"><app-icon name="plus" [size]="16" /> Add Learner</button>
+      }
+    </div>
+  </header>
+
+  <section class="card filters">
+    <label class="search">
+      <app-icon name="search" />
+      <input class="input" type="search" placeholder="Search learner ID, LRN or name…" [(ngModel)]="q" (ngModelChange)="search()" aria-label="Search learners" />
+    </label>
+    @if (data(); as d) {
+      @if (d.sections.length > 1) {
+        <select class="input" [(ngModel)]="sectionId" (ngModelChange)="load()" aria-label="Section">
+          <option [ngValue]="null">All sections</option>
+          @for (s of d.sections; track s.id) {
+            <option [ngValue]="s.id">{{ s.name }}</option>
+          }
+        </select>
+      }
+    }
+    <select class="input" [(ngModel)]="monitoring" (ngModelChange)="load()" aria-label="Monitoring status">
+      <option value="">All statuses</option>
+      <option value="AT_RISK">At Risk</option>
+      <option value="MONITOR">Monitor</option>
+      <option value="ON_TRACK">On Track</option>
+    </select>
+    <select class="input" [(ngModel)]="sort" (ngModelChange)="load()" aria-label="Sort">
+      <option value="name">Sort by name</option>
+      <option value="risk">Needs attention first</option>
+    </select>
+    @if (auth.isAdmin()) {
+      <label class="check small">
+        <span class="switch"><input type="checkbox" [(ngModel)]="archived" (ngModelChange)="load()" /><span></span></span>
+        Archived
+      </label>
+    }
+  </section>
+
+  @if (error()) {
+    <div class="card empty">{{ error() }}</div>
+  } @else if (data()) {
+    @let d = data()!;
+    <article class="panel">
+      <header class="panel-head">
+        <h2><app-icon name="list" /> Student Directory</h2>
+        <span class="small">{{ d.learners.length }} learner(s)</span>
+      </header>
+      <div class="table-wrap">
+        <table class="table stacked">
+          <thead>
+            <tr>
+              <th>Student ID</th>
+              <th>Name</th>
+              <th>Grade &amp; Section</th>
+              <th class="num">Attendance</th>
+              <th class="num">Assessment</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (l of d.learners; track l.id) {
+              <tr class="clickable" (click)="open(l)">
+                <td data-label="ID" class="nowrap"><strong>{{ l.learnerNo }}</strong></td>
+                <td data-label="Name">
+                  <span class="who"><app-avatar [name]="l.name" [hue]="l.avatarHue" [size]="30" /> {{ l.name }}</span>
+                </td>
+                <td data-label="Section">{{ l.section }}</td>
+                <td data-label="Attendance" class="num">{{ pct(l.attendanceRate) }}</td>
+                <td data-label="Assessment" class="num">{{ pct(l.assessmentAvg) }}</td>
+                <td data-label="Status">
+                  @if (l.status === 'ARCHIVED') {
+                    <span class="badge">Archived</span>
+                  } @else {
+                    <span class="badge" [class]="MON_TONE[l.monitoring]">{{ MON_LABEL[l.monitoring] }}</span>
+                  }
+                </td>
+                <td class="actions" (click)="$event.stopPropagation()">
+                  <a class="btn sm" [routerLink]="['/learners', l.id]"><app-icon name="eye" [size]="15" /> Profile</a>
+                  @if (auth.isAdmin()) {
+                    <button type="button" class="btn sm icon-only" (click)="openForm(l)" aria-label="Edit"><app-icon name="edit" [size]="15" /></button>
+                    <button type="button" class="btn sm icon-only" (click)="toggleArchive(l)" [attr.aria-label]="l.status === 'ACTIVE' ? 'Archive' : 'Restore'" [title]="l.status === 'ACTIVE' ? 'Archive' : 'Restore'">
+                      <app-icon [name]="l.status === 'ACTIVE' ? 'archive' : 'refresh'" [size]="15" />
+                    </button>
+                  }
+                </td>
+              </tr>
+            } @empty {
+              <tr><td colspan="7" class="empty">No learners found.</td></tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </article>
+  } @else {
+    <div class="skeleton" style="min-height: 400px"></div>
+  }
+</div>
+
+<app-modal [open]="formOpen()" [title]="editingId ? 'Edit Learner' : 'Add Learner'" [width]="620" (closed)="formOpen.set(false)">
+  <form class="form-grid" (ngSubmit)="save()">
+    <label class="field">
+      <span>First name</span>
+      <input class="input" name="firstName" [(ngModel)]="form.firstName" required />
+    </label>
+    <label class="field">
+      <span>Last name</span>
+      <input class="input" name="lastName" [(ngModel)]="form.lastName" required />
+    </label>
+    <label class="field">
+      <span>Sex</span>
+      <select class="input" name="sex" [(ngModel)]="form.sex">
+        <option value="M">Male</option>
+        <option value="F">Female</option>
+      </select>
+    </label>
+    <label class="field">
+      <span>Grade &amp; section</span>
+      <select class="input" name="sectionId" [(ngModel)]="form.sectionId" required>
+        @for (s of data()?.sections ?? []; track s.id) {
+          <option [ngValue]="s.id">{{ s.name }}</option>
+        }
+      </select>
+    </label>
+    <label class="field">
+      <span>LRN</span>
+      <input class="input" name="lrn" [(ngModel)]="form.lrn" inputmode="numeric" maxlength="12" placeholder="12 digits" />
+    </label>
+    <label class="field">
+      <span>Birthdate</span>
+      <input class="input" type="date" name="birthDate" [(ngModel)]="form.birthDate" />
+    </label>
+    <label class="field">
+      <span>Parent / guardian</span>
+      <input class="input" name="guardian" [(ngModel)]="form.guardian" />
+    </label>
+    <label class="field">
+      <span>Contact number</span>
+      <input class="input" name="contactNo" [(ngModel)]="form.contactNo" inputmode="tel" />
+    </label>
+    <div class="full row" style="justify-content: flex-end">
+      <button type="button" class="btn" (click)="formOpen.set(false)">Cancel</button>
+      <button type="submit" class="btn primary" [disabled]="saving()">{{ saving() ? 'Saving…' : 'Save' }}</button>
+    </div>
+  </form>
+</app-modal>

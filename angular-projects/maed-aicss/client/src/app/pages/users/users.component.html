@@ -1,0 +1,88 @@
+<div class="page">
+  <header class="page-head">
+    <div>
+      <h1><app-icon name="user-plus" [size]="28" /> User Management</h1>
+      <p>Manage teacher, admin, and other users.</p>
+    </div>
+    <div class="tools">
+      <input class="input" type="search" placeholder="Search users…" [ngModel]="q()" (ngModelChange)="q.set($event)" aria-label="Search users" />
+      <button type="button" class="btn primary" (click)="open()"><app-icon name="plus" [size]="16" /> Add User</button>
+    </div>
+  </header>
+
+  <article class="panel">
+    <header class="panel-head"><h2><app-icon name="users" /> Accounts</h2><span class="small">{{ filtered().length }} user(s)</span></header>
+    <div class="table-wrap">
+      <table class="table stacked">
+        <thead><tr><th>ID</th><th>Name</th><th>Role</th><th>Sections</th><th>Last login</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+          @for (u of filtered(); track u.id) {
+            <tr>
+              <td data-label="ID" class="nowrap">{{ (u.role === 'ADMIN' ? 'ADM-' : 'USR-') + (u.id + '').padStart(3, '0') }}</td>
+              <td data-label="Name">
+                <span class="row"><app-avatar [name]="u.name" [hue]="u.avatarHue" [size]="30" /><span><strong>{{ u.name }}</strong><br /><span class="muted small">{{ u.email }}</span></span></span>
+              </td>
+              <td data-label="Role"><span class="badge" [class]="u.role === 'ADMIN' ? 'purple' : 'info'">{{ u.role === 'ADMIN' ? 'Administrator' : 'Teacher' }}</span></td>
+              <td data-label="Sections" class="small">{{ u.sections?.join(', ') || '-' }}</td>
+              <td data-label="Last login" class="small nowrap">{{ fmtDateTime(u.lastLoginAt) }}</td>
+              <td data-label="Status"><span class="badge" [class]="u.status === 'ACTIVE' ? 'success' : ''">{{ u.status === 'ACTIVE' ? 'Active' : 'Inactive' }}</span></td>
+              <td class="right nowrap">
+                <button type="button" class="btn sm icon-only" (click)="open(u)" aria-label="Edit"><app-icon name="edit" [size]="15" /></button>
+                @if (u.id !== auth.user()?.id) {
+                  <button type="button" class="btn sm" (click)="toggleStatus(u)">{{ u.status === 'ACTIVE' ? 'Deactivate' : 'Activate' }}</button>
+                }
+              </td>
+            </tr>
+          } @empty {
+            <tr><td colspan="7" class="empty">{{ users() ? 'No users match.' : 'Loading…' }}</td></tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  </article>
+
+  <article class="panel">
+    <header class="panel-head light"><h2><app-icon name="lock" /> Role Permissions</h2></header>
+    <div class="table-wrap">
+      <table class="table">
+        <thead><tr><th>Module</th><th>Teacher</th><th>Administrator</th></tr></thead>
+        <tbody>
+          @for (p of PERMISSIONS; track p[0]) {
+            <tr><td><strong>{{ p[0] }}</strong></td><td>{{ p[1] }}</td><td>{{ p[2] }}</td></tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  </article>
+</div>
+
+<app-modal [open]="formOpen()" [title]="editingId ? 'Edit User' : 'Add User'" (closed)="formOpen.set(false)">
+  <form class="form-grid" (ngSubmit)="save()">
+    <label class="field"><span>First name</span><input class="input" name="fn" [(ngModel)]="form.firstName" required /></label>
+    <label class="field"><span>Last name</span><input class="input" name="ln" [(ngModel)]="form.lastName" required /></label>
+    <label class="field full"><span>Email</span><input class="input" type="email" name="email" [(ngModel)]="form.email" required autocomplete="off" /></label>
+    <label class="field">
+      <span>Role</span>
+      <select class="input" name="role" [(ngModel)]="form.role">
+        <option value="TEACHER">Teacher</option>
+        <option value="ADMIN">Administrator</option>
+      </select>
+    </label>
+    <label class="field">
+      <span>Status</span>
+      <select class="input" name="status" [(ngModel)]="form.status">
+        <option value="ACTIVE">Active</option>
+        <option value="INACTIVE">Inactive</option>
+      </select>
+    </label>
+    <label class="field full">
+      <span>{{ editingId ? 'Reset password (leave blank to keep)' : 'Password' }}</span>
+      <input class="input" type="password" name="pw" [(ngModel)]="form.password" minlength="8" autocomplete="new-password" [required]="!editingId" />
+      <small>At least 8 characters.</small>
+    </label>
+    <div class="full row" style="justify-content: flex-end">
+      <button type="button" class="btn" (click)="formOpen.set(false)">Cancel</button>
+      <button type="submit" class="btn primary" [disabled]="saving()">{{ saving() ? 'Saving…' : 'Save' }}</button>
+    </div>
+  </form>
+</app-modal>

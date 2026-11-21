@@ -1,0 +1,181 @@
+<div class="page">
+  <header class="page-head">
+    <h1><app-icon name="clipboard" [size]="28" /> Assessment Records</h1>
+    <div class="tools">
+      @if (data(); as d) {
+        <select class="input" [(ngModel)]="learningArea" (ngModelChange)="load()" aria-label="Learning area">
+          <option value="">All Competencies</option>
+          @for (a of d.learningAreas; track a) {
+            <option [value]="a">{{ a }}</option>
+          }
+        </select>
+        @if (d.sections.length > 1) {
+          <select class="input" [(ngModel)]="sectionId" (ngModelChange)="load()" aria-label="Section">
+            <option [ngValue]="null">All sections</option>
+            @for (s of d.sections; track s.id) {
+              <option [ngValue]="s.id">{{ s.name }}</option>
+            }
+          </select>
+        }
+      }
+      <select class="input" [(ngModel)]="quarter" (ngModelChange)="load()" aria-label="Quarter">
+        <option [ngValue]="null">All quarters</option>
+        @for (q of [1, 2, 3, 4]; track q) {
+          <option [ngValue]="q">Quarter {{ q }}</option>
+        }
+      </select>
+      <button type="button" class="btn" (click)="export()"><app-icon name="download" [size]="16" /> Export</button>
+      <button type="button" class="btn primary" (click)="openNew()" [disabled]="!data()?.sections?.length"><app-icon name="plus" [size]="16" /> New Assessment</button>
+    </div>
+  </header>
+
+  @if (error()) {
+    <div class="card empty">{{ error() }}</div>
+  } @else if (data()) {
+    @let d = data()!;
+    <section class="grid grid-side">
+      <article class="panel">
+        <header class="panel-head light"><h2>Assessment Summary</h2></header>
+        <div class="panel-body summary">
+          <div class="kpi-tile compact">
+            <span class="ico"><app-icon name="check-circle" [size]="24" /></span>
+            <div><div class="val">{{ pct(d.summary.average, 0) }}</div><div class="lbl">Overall Average</div></div>
+          </div>
+          <div class="kpi-tile compact green">
+            <span class="ico"><app-icon name="trend" [size]="24" /></span>
+            <div>
+              <div class="val">{{ d.summary.delta === null ? pct(d.summary.passRate, 0) : (d.summary.delta >= 0 ? '+' : '') + d.summary.delta + '%' }}</div>
+              <div class="lbl">{{ d.summary.delta === null ? 'Pass Rate' : 'vs. Previous Quarter' }}</div>
+            </div>
+          </div>
+          <div class="kpi-tile compact purple">
+            <span class="ico"><app-icon name="trophy" [size]="24" /></span>
+            <div><div class="val">{{ d.summary.assessments }}</div><div class="lbl">Assessments · {{ d.summary.scores }} scores</div></div>
+          </div>
+        </div>
+      </article>
+      <article class="panel">
+        <header class="panel-head light"><h2>Performance Distribution</h2></header>
+        <div class="panel-body">
+          @if (distribution().length) {
+            <app-ring-chart [segments]="distribution()" [center]="pct(d.summary.average, 0)" caption="Average" ariaLabel="Performance distribution" />
+          } @else {
+            <p class="empty">No scores yet.</p>
+          }
+        </div>
+      </article>
+    </section>
+
+    <article class="panel">
+      <header class="panel-head">
+        <h2><app-icon name="list" /> Assessment Entries</h2>
+        <span class="small">{{ d.assessments.length }} records</span>
+      </header>
+      <div class="table-wrap">
+        <table class="table stacked">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Assessment</th>
+              <th>Competency</th>
+              <th>Section</th>
+              <th class="num">Average</th>
+              <th class="num">Passed</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (a of d.assessments; track a.id) {
+              <tr>
+                <td data-label="Date" class="nowrap">{{ fmtDate(a.date) }}</td>
+                <td data-label="Assessment"><strong>{{ a.title }}</strong><br /><span class="muted small">{{ TYPE_LABEL[a.type] }} · /{{ a.maxScore }}{{ a.createdBy ? ' · ' + a.createdBy : '' }}</span></td>
+                <td data-label="Competency"><span class="nowrap">{{ a.competency }}</span><br /><span class="muted small">{{ a.learningArea }}</span></td>
+                <td data-label="Section">{{ a.section }}</td>
+                <td data-label="Average" class="num">
+                  <span class="score" [class.low]="a.average !== null && a.average < d.masteryTarget">{{ pct(a.average, 0) }}</span>
+                </td>
+                <td data-label="Passed" class="num">{{ a.passed }}/{{ a.scored }}</td>
+                <td class="actions">
+                  <button type="button" class="btn sm" (click)="openEdit(a)"><app-icon name="edit" [size]="15" /> Scores</button>
+                  <button type="button" class="btn sm icon-only" (click)="remove(a)" aria-label="Delete"><app-icon name="trash" [size]="15" /></button>
+                </td>
+              </tr>
+            } @empty {
+              <tr><td colspan="7" class="empty">No assessments recorded for these filters.</td></tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </article>
+  } @else {
+    <div class="skeleton" style="min-height: 400px"></div>
+  }
+</div>
+
+<app-modal [open]="editorOpen()" [title]="editingId ? 'Edit Assessment & Scores' : 'New Assessment'" [width]="820" (closed)="editorOpen.set(false)">
+  <form (ngSubmit)="save()">
+    <div class="form-grid">
+      <label class="field">
+        <span>Section</span>
+        <select class="input" name="sectionId" [(ngModel)]="form.sectionId" (ngModelChange)="loadRoster()" [disabled]="!!editingId" required>
+          @for (s of data()?.sections ?? []; track s.id) {
+            <option [ngValue]="s.id">{{ s.name }}</option>
+          }
+        </select>
+      </label>
+      <label class="field">
+        <span>Competency</span>
+        <select class="input" name="competencyId" [(ngModel)]="form.competencyId" required>
+          <option [ngValue]="null" disabled>Choose…</option>
+          @for (c of competencies(); track c.id) {
+            <option [ngValue]="c.id">{{ c.code }} · {{ c.learningArea }}</option>
+          }
+        </select>
+      </label>
+      <label class="field full">
+        <span>Title</span>
+        <input class="input" name="title" [(ngModel)]="form.title" required placeholder="e.g. Quiz 3: Speech styles" />
+      </label>
+      <label class="field">
+        <span>Type</span>
+        <select class="input" name="type" [(ngModel)]="form.type">
+          @for (t of TYPES; track t) {
+            <option [value]="t">{{ TYPE_LABEL[t] }}</option>
+          }
+        </select>
+      </label>
+      <div class="form-grid inner">
+        <label class="field">
+          <span>Date</span>
+          <input class="input" type="date" name="date" [(ngModel)]="form.date" required />
+        </label>
+        <label class="field">
+          <span>Highest possible score</span>
+          <input class="input" type="number" min="1" max="1000" name="maxScore" [(ngModel)]="form.maxScore" required />
+        </label>
+      </div>
+    </div>
+
+    <h3 class="sub">Scores <span class="muted small">({{ scored() }} of {{ rows().length }} entered, leave blank if not taken)</span></h3>
+    @if (loadingRoster()) {
+      <div class="skeleton" style="min-height: 120px"></div>
+    } @else {
+      <ul class="scores">
+        @for (r of rows(); track r.id; let i = $index) {
+          <li>
+            <span class="no">{{ i + 1 }}</span>
+            <div class="who"><strong>{{ r.name }}</strong><small>{{ r.learnerNo }}</small></div>
+            <input class="input" type="number" min="0" [max]="form.maxScore" step="0.5" [name]="'s' + r.id" [ngModel]="r.score" (ngModelChange)="setScore(r.id, $event)" [attr.aria-label]="'Score for ' + r.name" />
+            <span class="pct">{{ percent(r.score) }}</span>
+          </li>
+        } @empty {
+          <li class="empty">Choose a section to load its learners.</li>
+        }
+      </ul>
+    }
+    <div class="row actions-bar">
+      <button type="button" class="btn" (click)="editorOpen.set(false)">Cancel</button>
+      <button type="submit" class="btn primary" [disabled]="saving() || !form.competencyId || !form.title">{{ saving() ? 'Saving…' : 'Save Assessment' }}</button>
+    </div>
+  </form>
+</app-modal>

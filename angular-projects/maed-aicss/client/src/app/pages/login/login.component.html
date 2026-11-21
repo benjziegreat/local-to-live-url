@@ -1,0 +1,73 @@
+<div class="login">
+  <section class="hero">
+    <div class="hero-copy">
+      <h1>AICSS</h1>
+      <h2>Attendance-Informed<br />Competency Support System</h2>
+      <p class="tag">Monitor. Support. Empower.</p>
+      <p class="blurb">An intelligent platform for tracking attendance, monitoring competencies, and supporting learner success.</p>
+      <ul class="features">
+        <li><app-icon name="calendar-check" /> Daily attendance &amp; SF2-inspired reports</li>
+        <li><app-icon name="target" /> Competency mastery &amp; learning gaps</li>
+        <li><app-icon name="bell" /> Instructional alerts with recommended actions</li>
+      </ul>
+    </div>
+    <div class="hero-art" aria-hidden="true"><app-logo [size]="220" /></div>
+  </section>
+
+  <section class="card form-card">
+    <app-logo [size]="84" />
+    <h1>AICSS</h1>
+    <p class="muted">Login to your account</p>
+
+    <form (ngSubmit)="submit()" class="stack">
+      <label class="input-icon">
+        <app-icon name="user" />
+        <input class="input" type="email" name="email" [(ngModel)]="email" placeholder="Email address" autocomplete="username" required />
+      </label>
+      <label class="input-icon">
+        <app-icon name="lock" />
+        <input class="input" [type]="show() ? 'text' : 'password'" name="password" [(ngModel)]="password" placeholder="Password" autocomplete="current-password" required />
+        <button type="button" class="eye" (click)="show.set(!show())" [attr.aria-label]="show() ? 'Hide password' : 'Show password'">
+          <app-icon [name]="show() ? 'eye-off' : 'eye'" />
+        </button>
+      </label>
+
+      @if (error()) {
+        <p class="error" role="alert"><app-icon name="alert" [size]="16" /> {{ error() }}</p>
+      }
+
+      <button type="submit" class="btn navy block lg" [disabled]="busy()">{{ busy() ? 'Signing in…' : 'Sign In' }}</button>
+      <button type="button" class="link center" (click)="forgot.set(!forgot())">Forgot password?</button>
+      @if (forgot()) {
+        <p class="hint">Passwords are reset by your system administrator from <strong>User Management</strong>.</p>
+      }
+    </form>
+    <p class="help muted small">Need help? Contact your system administrator.</p>
+  </section>
+
+  <section class="roles card">
+    <header class="roles-head">
+      <h2><app-icon name="users" [size]="22" /> User Roles in AICSS</h2>
+      <em>Right Access. Right Purpose.</em>
+    </header>
+    <div class="role-grid">
+      @for (r of roles; track r.role) {
+        <article class="role" [class]="r.tone">
+          <div class="role-top">
+            <span class="role-ico"><app-icon [name]="r.icon" [size]="34" /></span>
+            <span class="role-name">{{ r.role }}</span>
+          </div>
+          <h3>{{ r.heading }}</h3>
+          <ul>
+            @for (p of r.perks; track p) {
+              <li><app-icon name="check-circle" [size]="18" /> {{ p }}</li>
+            }
+          </ul>
+          <button type="button" class="btn block" [class.primary]="r.tone === 'teacher'" [class.purple]="r.tone === 'admin'" [disabled]="busy()" (click)="useDemo(r.email)">
+            Continue as {{ r.role === 'Administrator' ? 'Admin' : r.role }} (demo) <app-icon name="arrow-right" [size]="16" />
+          </button>
+        </article>
+      }
+    </div>
+  </section>
+</div>

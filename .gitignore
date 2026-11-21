@@ -4,6 +4,9 @@ node_modules/
 server/data/
 server/bin/
 
+# Office temporary lock files (created while a document is open in Excel/Word)
+~$*
+
 # Tray app build output
 desktop/.stage/
 desktop/.out/

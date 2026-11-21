@@ -1,0 +1,34 @@
+.top {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(0, 1.6fr);
+  gap: 16px;
+  @media (max-width: 1100px) { grid-template-columns: repeat(3, minmax(0, 1fr)); .insight { grid-column: 1 / -1; } }
+  @media (max-width: 560px) { grid-template-columns: minmax(0, 1fr); }
+}
+
+button.kpi-tile {
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  &.sel { outline: 3px solid var(--brand); outline-offset: 2px; }
+}
+
+.insight {
+  h3 { display: flex; align-items: center; gap: 8px; font-size: 1rem; app-icon { color: var(--gold); } }
+  p { margin: 8px 0 0; }
+}
+
+.issue { min-width: 220px; }
+.action { min-width: 200px; }
+
+.fu-head { display: flex; align-items: center; gap: 10px; }
+.rec {
+  display: flex;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--info-soft);
+  app-icon { color: var(--brand); margin-top: 2px; }
+}
+.prev { padding: 8px 12px; border-left: 3px solid var(--line); color: var(--text-2); }

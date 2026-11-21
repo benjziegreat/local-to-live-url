@@ -1,0 +1,139 @@
+<div class="page">
+  <header class="page-head">
+    <h1><app-icon name="bell" [size]="28" /> Instructional Alerts</h1>
+    <div class="tools">
+      @if (data(); as d) {
+        @if (d.sections.length > 1) {
+          <select class="input" [(ngModel)]="sectionId" (ngModelChange)="load()" aria-label="Section">
+            <option [ngValue]="null">All sections</option>
+            @for (s of d.sections; track s.id) {
+              <option [ngValue]="s.id">{{ s.name }}</option>
+            }
+          </select>
+        }
+      }
+      <select class="input" [(ngModel)]="level" (ngModelChange)="load()" aria-label="Level">
+        <option value="">All levels</option>
+        @for (l of LEVELS; track l) {
+          <option [value]="l">{{ LEVEL_LABEL[l] }}</option>
+        }
+      </select>
+      <select class="input" [(ngModel)]="status" (ngModelChange)="load()" aria-label="Status">
+        <option value="">Active (open + followed up)</option>
+        <option value="OPEN">Open</option>
+        <option value="FOLLOWED_UP">Followed up</option>
+        <option value="RESOLVED">Resolved</option>
+      </select>
+      <button type="button" class="btn" (click)="refresh()" [disabled]="refreshing()"><app-icon name="refresh" [size]="16" /> {{ refreshing() ? 'Recalculating…' : 'Recalculate' }}</button>
+    </div>
+  </header>
+
+  @if (error()) {
+    <div class="card empty">{{ error() }}</div>
+  } @else if (data()) {
+    @let d = data()!;
+    <section class="top">
+      <button type="button" class="kpi-tile compact red" [class.sel]="level === 'HIGH'" (click)="filterLevel('HIGH')">
+        <span class="ico"><app-icon name="alert-octagon" [size]="24" /></span>
+        <div><div class="val">{{ d.counts.HIGH }}</div><div class="lbl">High</div></div>
+      </button>
+      <button type="button" class="kpi-tile compact orange" [class.sel]="level === 'MEDIUM'" (click)="filterLevel('MEDIUM')">
+        <span class="ico"><app-icon name="alert" [size]="24" /></span>
+        <div><div class="val">{{ d.counts.MEDIUM }}</div><div class="lbl">Medium</div></div>
+      </button>
+      <button type="button" class="kpi-tile compact" [class.sel]="level === 'LOW'" (click)="filterLevel('LOW')">
+        <span class="ico"><app-icon name="info" [size]="24" /></span>
+        <div><div class="val">{{ d.counts.LOW }}</div><div class="lbl">Low</div></div>
+      </button>
+      <aside class="card insight">
+        <h3><app-icon name="bulb" [size]="22" /> Alert Insights</h3>
+        <p>{{ insight() }}</p>
+        <p class="muted small">{{ d.byStatus.FOLLOWED_UP }} followed up · {{ d.byStatus.RESOLVED }} resolved</p>
+      </aside>
+    </section>
+
+    <article class="panel">
+      <header class="panel-head">
+        <h2><app-icon name="list" /> Alerts &amp; Recommended Interventions</h2>
+        <span class="small">{{ d.items.length }} shown</span>
+      </header>
+      <div class="table-wrap">
+        <table class="table stacked">
+          <thead>
+            <tr>
+              <th>Learner</th>
+              <th>Alert Level</th>
+              <th>Issue</th>
+              <th>Recommended Action</th>
+              <th>Status</th>
+              <th>Date</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (a of d.items; track a.id) {
+              <tr>
+                <td data-label="Learner">
+                  @if (a.learnerId) {
+                    <a [routerLink]="['/learners', a.learnerId]"><strong>{{ a.learnerNo }}</strong></a><br /><span class="muted small">{{ a.learner }}</span>
+                  } @else {
+                    <strong>Whole class</strong><br /><span class="muted small">{{ a.section }}</span>
+                  }
+                </td>
+                <td data-label="Level"><span class="badge" [class]="LEVEL_TONE[a.level]"><app-icon [name]="LEVEL_ICON[a.level]" [size]="13" /> {{ LEVEL_LABEL[a.level] }}</span></td>
+                <td data-label="Issue" class="issue"><strong>{{ a.title }}</strong><br /><span class="muted small">{{ a.detail }}</span></td>
+                <td data-label="Action" class="action">{{ a.action }}</td>
+                <td data-label="Status">
+                  <span class="badge" [class]="STATUS_TONE[a.status]">{{ STATUS_LABEL[a.status] }}</span>
+                  @if (a.followUpNote) {
+                    <br /><span class="muted small" [title]="a.followUpNote">{{ a.followUpBy ?? 'System' }}</span>
+                  }
+                </td>
+                <td data-label="Date" class="nowrap">{{ fmtDate(a.updatedAt) }}</td>
+                <td class="right"><button type="button" class="btn sm" (click)="openFollowUp(a)"><app-icon name="edit" [size]="15" /> Follow up</button></td>
+              </tr>
+            } @empty {
+              <tr><td colspan="7" class="empty">No alerts for these filters.</td></tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </article>
+  } @else {
+    <div class="skeleton" style="min-height: 400px"></div>
+  }
+</div>
+
+<app-modal [open]="!!current()" title="Follow Up Alert" (closed)="current.set(null)">
+  @if (current(); as a) {
+    <div class="fu-head">
+      <span class="badge" [class]="LEVEL_TONE[a.level]">{{ LEVEL_LABEL[a.level] }}</span>
+      <strong>{{ a.title }}</strong>
+    </div>
+    <p class="muted">{{ a.detail }}</p>
+    <p class="rec"><app-icon name="bulb" [size]="16" /> {{ a.action }}</p>
+    @if (a.followUpNote) {
+      <p class="prev small"><strong>Last update</strong> ({{ a.followUpBy ?? 'System' }}, {{ fmtDateTime(a.followUpAt) }}): {{ a.followUpNote }}</p>
+    }
+    <form class="stack" (ngSubmit)="saveFollowUp()">
+      <label class="field">
+        <span>Status</span>
+        <select class="input" name="status" [(ngModel)]="fuStatus">
+          <option value="FOLLOWED_UP">Followed up (still monitoring)</option>
+          <option value="RESOLVED">Resolved</option>
+          <option value="OPEN">Reopen</option>
+        </select>
+      </label>
+      @if (fuStatus !== 'OPEN') {
+        <label class="field">
+          <span>What did you do?</span>
+          <textarea class="input" name="note" [(ngModel)]="fuNote" placeholder="e.g. Called the guardian on Nov 21; agreed on an attendance plan." required></textarea>
+        </label>
+      }
+      <div class="row" style="justify-content: flex-end">
+        <button type="button" class="btn" (click)="current.set(null)">Cancel</button>
+        <button type="submit" class="btn primary" [disabled]="saving()">{{ saving() ? 'Saving…' : 'Save' }}</button>
+      </div>
+    </form>
+  }
+</app-modal>

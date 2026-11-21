@@ -1,0 +1,200 @@
+<div class="page">
+  <header class="page-head greet">
+    <div>
+      <h1>{{ title() }}</h1>
+      @if (data(); as d) {
+        <p>{{ d.settings.schoolLevel }} • Academic Year {{ d.settings.academicYear }} • Quarter {{ d.settings.currentQuarter }}</p>
+      }
+    </div>
+    @if (data(); as d) {
+      @if (d.sections.length > 1) {
+        <div class="tools">
+          <select class="input" [(ngModel)]="sectionId" (ngModelChange)="load()" aria-label="Section">
+            <option [ngValue]="null">{{ auth.isAdmin() ? 'All sections' : 'All my sections' }}</option>
+            @for (s of d.sections; track s.id) {
+              <option [ngValue]="s.id">{{ s.name }}</option>
+            }
+          </select>
+        </div>
+      }
+    }
+  </header>
+
+  @if (error()) {
+    <div class="card empty">
+      <p>{{ error() }}</p>
+      <button type="button" class="btn" (click)="load()"><app-icon name="refresh" /> Try again</button>
+    </div>
+  } @else if (data()) {
+    @let d = data()!;
+    <section class="grid grid-4">
+      <div class="kpi-tile">
+        <span class="ico"><app-icon name="users" [size]="30" /></span>
+        <div><div class="val">{{ d.kpis.enrolled }}</div><div class="lbl">Enrolled Learners</div></div>
+      </div>
+      <div class="kpi-tile green">
+        <span class="ico"><app-icon name="calendar-check" [size]="30" /></span>
+        <div><div class="val">{{ pct(d.kpis.averageAttendance) }}</div><div class="lbl">Average Attendance</div></div>
+        @if (d.kpis.attendanceDelta !== null) {
+          <span class="delta" [class.up]="d.kpis.attendanceDelta >= 0" [class.down]="d.kpis.attendanceDelta < 0" title="Last 20 school days vs the 20 before">
+            {{ d.kpis.attendanceDelta >= 0 ? '▲ +' : '▼ ' }}{{ d.kpis.attendanceDelta }}%
+          </span>
+        }
+      </div>
+      <a class="kpi-tile purple" routerLink="/competencies">
+        <span class="ico"><app-icon name="award" [size]="30" /></span>
+        <div><div class="val">{{ d.kpis.competenciesMonitored }}</div><div class="lbl">Competencies Monitored</div></div>
+      </a>
+      <a class="kpi-tile orange" routerLink="/learners" [queryParams]="{ sort: 'risk' }">
+        <span class="ico"><app-icon name="alert" [size]="30" /></span>
+        <div><div class="val">{{ d.kpis.needSupport }}</div><div class="lbl">Learners Need Support</div></div>
+      </a>
+    </section>
+
+    <section class="grid grid-2">
+      <article class="panel">
+        <header class="panel-head">
+          <h2><app-icon name="trend" [size]="20" /> Attendance Overview</h2>
+          <select class="input" [ngModel]="range()" (ngModelChange)="setRange($event)" aria-label="Range">
+            <option value="week">This Week</option>
+            <option value="month">This Month</option>
+          </select>
+        </header>
+        <div class="panel-body"><app-line-chart [points]="trendPoints()" [showValues]="range() === 'week'" ariaLabel="Daily attendance rate" /></div>
+      </article>
+      <article class="panel">
+        <header class="panel-head">
+          <h2><app-icon name="chart" [size]="20" /> Monthly Attendance</h2>
+        </header>
+        <div class="panel-body"><app-bar-chart [points]="monthPoints()" ariaLabel="Monthly attendance rate" /></div>
+      </article>
+    </section>
+
+    <section class="grid grid-2">
+      <article class="panel">
+        <header class="panel-head light">
+          <h2><app-icon name="target" [size]="20" /> Competency Progress</h2>
+          <a class="link" routerLink="/competencies">View Details <app-icon name="arrow-right" [size]="16" /></a>
+        </header>
+        <div class="panel-body">
+          <ul class="progress-list">
+            @for (a of d.competencyProgress; track a.learningArea; let i = $index) {
+              <li>
+                <span class="name">{{ a.learningArea }}</span>
+                <div class="progress"><span [class]="'c-' + (i % 6)" [style.width.%]="a.masteryRate ?? 0"></span></div>
+                <b>{{ a.masteryRate === null ? '-' : a.masteryRate.toFixed(0) + '%' }}</b>
+              </li>
+            } @empty {
+              <li class="empty">No competencies yet.</li>
+            }
+          </ul>
+        </div>
+      </article>
+
+      <article class="panel">
+        <header class="panel-head">
+          <h2><app-icon name="bell" [size]="20" /> Instructional Alerts</h2>
+          <a class="link" routerLink="/alerts">View All <app-icon name="arrow-right" [size]="16" /></a>
+        </header>
+        <ul class="list">
+          @for (a of d.alerts; track a.id) {
+            <li class="list-item alert-row">
+              <span class="badge lg" [class]="LEVEL_TONE[a.level]">{{ LEVEL_LABEL[a.level] }}</span>
+              <div class="alert-text">
+                <strong>{{ a.title }}{{ a.learner ? ': ' + a.learner : '' }}</strong>
+                <small>{{ a.action }}</small>
+              </div>
+              <time class="muted small nowrap">{{ fmtDate(a.updatedAt) }}</time>
+            </li>
+          } @empty {
+            <li class="empty">No open alerts. 🎉</li>
+          }
+        </ul>
+      </article>
+    </section>
+
+    <article class="panel">
+      <header class="panel-head">
+        <h2><app-icon name="users" [size]="20" /> Learner Monitoring</h2>
+        <button type="button" class="btn sm" (click)="exportLearners()"><app-icon name="download" [size]="16" /> Export Report</button>
+      </header>
+      <div class="table-wrap">
+        <table class="table stacked">
+          <thead>
+            <tr>
+              <th>Learner</th>
+              <th>Attendance</th>
+              <th>Competency Status</th>
+              <th>Assessment</th>
+              <th>Recommended Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (l of topLearners(); track l.id) {
+              <tr class="clickable" (click)="open(l.id)">
+                <td data-label="Learner"><strong>{{ l.learnerNo }}</strong><br /><span class="muted small">{{ l.name }} · {{ l.section }}</span></td>
+                <td data-label="Attendance" class="num">{{ pct(l.attendanceRate) }}</td>
+                <td data-label="Status"><span class="badge" [class]="MON_TONE[l.monitoring]">{{ MON_LABEL[l.monitoring] }}</span></td>
+                <td data-label="Assessment">{{ pct(l.assessmentAvg, 0) }} ({{ l.descriptor }})</td>
+                <td data-label="Action">{{ l.action }}</td>
+              </tr>
+            } @empty {
+              <tr><td colspan="5" class="empty">No learners assigned yet.</td></tr>
+            }
+          </tbody>
+        </table>
+      </div>
+      @if (d.learners.length > topLearners().length) {
+        <footer class="panel-foot">
+          <span class="muted small">Showing learners who need attention first · {{ topLearners().length }} of {{ d.learners.length }}</span>
+          <a class="link" routerLink="/learners" [queryParams]="{ sort: 'risk' }">View all learners <app-icon name="arrow-right" [size]="16" /></a>
+        </footer>
+      }
+    </article>
+
+    @if (d.system; as s) {
+      <section class="grid grid-side">
+        <article class="panel">
+          <header class="panel-head">
+            <h2><app-icon name="history" [size]="20" /> Recent System Activity</h2>
+            <a class="link" routerLink="/logs">System Logs <app-icon name="arrow-right" [size]="16" /></a>
+          </header>
+          <ul class="list">
+            @for (a of s.activity; track a.id) {
+              <li class="list-item">
+                <app-icon name="file" />
+                <div class="alert-text">
+                  <strong>{{ a.action }} · <span class="muted">{{ a.entity }}</span></strong>
+                  <small>{{ a.user }}{{ a.details ? ' — ' + a.details : '' }}</small>
+                </div>
+                <time class="muted small nowrap">{{ fmtDateTime(a.createdAt) }}</time>
+              </li>
+            } @empty {
+              <li class="empty">No activity yet.</li>
+            }
+          </ul>
+        </article>
+        <article class="panel">
+          <header class="panel-head">
+            <h2><app-icon name="settings" [size]="20" /> System Overview</h2>
+          </header>
+          <div class="panel-body sys">
+            <div class="kpi-tile compact"><span class="ico"><app-icon name="users" [size]="22" /></span><div><div class="val">{{ s.users }}</div><div class="lbl">Total users ({{ s.activeUsers }} active)</div></div></div>
+            <div class="kpi-tile compact green"><span class="ico"><app-icon name="school" [size]="22" /></span><div><div class="val">{{ s.sections }}</div><div class="lbl">Sections · {{ s.teachers }} teachers</div></div></div>
+            <div class="kpi-tile compact purple"><span class="ico"><app-icon name="chart" [size]="22" /></span><div><div class="val">{{ s.reportsGenerated }}</div><div class="lbl">Reports generated</div></div></div>
+            <div class="row-wrap">
+              <a class="btn primary sm" routerLink="/users"><app-icon name="user-plus" [size]="16" /> Manage users</a>
+              <a class="btn sm" routerLink="/settings"><app-icon name="settings" [size]="16" /> School settings</a>
+            </div>
+          </div>
+        </article>
+      </section>
+    }
+  } @else {
+    <div class="grid grid-4">
+      <div class="skeleton" style="min-height: 96px"></div><div class="skeleton" style="min-height: 96px"></div>
+      <div class="skeleton" style="min-height: 96px"></div><div class="skeleton" style="min-height: 96px"></div>
+    </div>
+    <div class="grid grid-2"><div class="skeleton" style="min-height: 280px"></div><div class="skeleton" style="min-height: 280px"></div></div>
+  }
+</div>

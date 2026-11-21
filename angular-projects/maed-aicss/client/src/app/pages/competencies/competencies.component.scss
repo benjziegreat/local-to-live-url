@@ -1,0 +1,43 @@
+.area-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+
+  li {
+    display: grid;
+    grid-template-columns: minmax(130px, 1.3fr) minmax(80px, 1.5fr) 46px 112px;
+    align-items: center;
+    gap: 14px;
+    padding: 10px;
+    border-radius: 10px;
+    cursor: pointer;
+    &:hover, &.focus { background: var(--surface-2); }
+  }
+  .name { font-weight: 500; }
+  b { text-align: right; }
+  .badge { justify-content: center; }
+  @media (max-width: 560px) {
+    li { grid-template-columns: 1fr auto; }
+    .progress { grid-column: 1 / -1; }
+    b { display: none; }
+  }
+}
+
+.center { text-align: center; }
+.title { min-width: 220px; .badge { margin-left: 8px; } }
+.mastery {
+  min-width: 140px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  .progress { flex: 1; min-width: 60px; }
+  span:last-child { font-weight: 700; width: 40px; text-align: right; }
+}
+.crit { color: var(--critical); }
+.actions { white-space: nowrap; text-align: right; .btn + .btn { margin-left: 4px; } }
+tr.inactive td { opacity: 0.6; }
+.lead { margin: 0 0 12px; }
+.sub { font-size: 0.95rem; margin: 16px 0 8px; }
+.mini { margin: 0; padding-left: 18px; color: var(--text-2); font-size: 0.85rem; display: grid; gap: 4px; }

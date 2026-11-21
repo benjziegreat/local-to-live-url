@@ -1,0 +1,31 @@
+.back { justify-self: start; }
+
+.hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 20px;
+  .id { flex: 1; min-width: 220px; }
+  h1 { font-size: clamp(1.3rem, 2.6vw, 1.7rem); margin: 2px 0; }
+  p { margin: 2px 0; color: var(--text-2); }
+}
+
+.rec {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 12px 16px;
+  border-radius: var(--radius);
+  background: var(--info-soft);
+  app-icon { color: var(--brand); }
+}
+
+.grow { flex: 1; min-width: 0; }
+.grow p { margin: 2px 0 0; }
+.grow .progress { margin-top: 6px; }
+.list-item.top { align-items: flex-start; }
+.note { padding-left: 8px; border-left: 3px solid var(--line); }
+.scroll { max-height: 290px; overflow-y: auto; }
+.low { color: var(--critical); }

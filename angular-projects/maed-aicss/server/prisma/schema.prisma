@@ -1,0 +1,300 @@
+// AICSS: Attendance-Informed Competency Support System
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  TEACHER
+  ADMIN
+}
+
+enum AccountStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum LearnerStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum Sex {
+  M
+  F
+}
+
+enum AttendanceStatus {
+  PRESENT
+  LATE
+  ABSENT
+  EXCUSED
+}
+
+enum AssessmentType {
+  QUIZ
+  PERFORMANCE_TASK
+  QUARTERLY_EXAM
+}
+
+enum AlertLevel {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum AlertType {
+  FREQUENT_ABSENCE
+  MISSED_CLASSES
+  BELOW_TARGET
+  COMPETENCY_NOT_MASTERED
+  NEEDS_RETEACHING
+}
+
+enum AlertStatus {
+  OPEN
+  FOLLOWED_UP
+  RESOLVED
+}
+
+model User {
+  id           Int           @id @default(autoincrement())
+  email        String        @unique
+  passwordHash String
+  firstName    String
+  lastName     String
+  role         Role
+  status       AccountStatus @default(ACTIVE)
+  avatarHue    Int           @default(210)
+  createdAt    DateTime      @default(now())
+  lastLoginAt  DateTime?
+
+  sections        Section[]
+  attendance      AttendanceRecord[]
+  assessments     Assessment[]
+  alertFollowUps  Alert[]
+  activity        ActivityLog[]
+  schedules       ClassSchedule[] @relation("ScheduleTeacher")
+}
+
+/// Single-row table holding school-wide configuration and monitoring preferences.
+model SchoolSetting {
+  id                    Int     @id @default(1)
+  schoolName            String
+  schoolId              String  @default("")
+  schoolLevel           String  @default("Senior High School")
+  division              String  @default("")
+  region                String  @default("")
+  academicYear          String
+  currentQuarter        Int     @default(1)
+  enableAttendance      Boolean @default(true)
+  enableCompetency      Boolean @default(true)
+  enableAlerts          Boolean @default(true)
+  /// Attendance rate (%) below which a learner is flagged
+  attendanceTarget      Int     @default(90)
+  /// Assessment percentage that counts as mastery / passing
+  masteryTarget         Int     @default(75)
+  /// Absences within the last 30 school days that raise a HIGH alert
+  absenceAlertThreshold Int     @default(5)
+  /// Section mastery rate (%) below which a competency needs reteaching
+  reteachThreshold      Int     @default(70)
+  /// Minutes after a period starts before a time-in counts as LATE
+  lateGraceMinutes      Int     @default(15)
+  /// Partial days (present but missed some periods) in the last 30 school days that raise an alert
+  missedClassThreshold  Int     @default(3)
+}
+
+model Section {
+  id         Int    @id @default(autoincrement())
+  name       String @unique
+  gradeLevel Int
+  strand     String
+  teacherId  Int?
+  teacher    User?  @relation(fields: [teacherId], references: [id], onDelete: SetNull)
+  /// Room allocated to the section (advisory / homeroom)
+  room       String?
+  /// The section's specialization elective (e.g. Physics, Programming, Bakery Operation)
+  electiveId Int?
+  elective   Subject? @relation(fields: [electiveId], references: [id], onDelete: SetNull)
+
+  learners    Learner[]
+  assessments Assessment[]
+  alerts      Alert[]
+  schedules   ClassSchedule[]
+}
+
+enum SubjectKind {
+  CORE
+  ELECTIVE
+  PROGRAM
+}
+
+/// Subject catalog: core subjects, specialization electives, and programs such as ARAL.
+model Subject {
+  id          Int         @id @default(autoincrement())
+  code        String      @unique
+  name        String      @unique
+  kind        SubjectKind
+  /// For electives: "Academic" or "TechPro"
+  track       String?
+  /// Room normally used (e.g. a laboratory); blank means the section's own room
+  defaultRoom String?
+  active      Boolean     @default(true)
+
+  sections  Section[]
+  schedules ClassSchedule[]
+}
+
+/// One weekly class meeting: a subject taught to a section at a set day, time and room.
+model ClassSchedule {
+  id           Int     @id @default(autoincrement())
+  sectionId    Int
+  section      Section @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  subjectId    Int
+  subject      Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  /// Subject teacher (may differ from the section adviser)
+  teacherId    Int?
+  teacher      User?   @relation("ScheduleTeacher", fields: [teacherId], references: [id], onDelete: SetNull)
+  /// 1 = Monday ... 6 = Saturday
+  dayOfWeek    Int
+  /// "HH:mm", 24-hour, school-local time
+  startTime    String
+  endTime      String
+  room         String
+
+  attendance AttendanceRecord[]
+
+  @@index([sectionId, dayOfWeek])
+  @@index([room, dayOfWeek])
+  @@index([teacherId, dayOfWeek])
+}
+
+model Learner {
+  id        Int           @id @default(autoincrement())
+  learnerNo String        @unique
+  lrn       String?       @unique
+  firstName String
+  lastName  String
+  sex       Sex
+  birthDate DateTime?     @db.Date
+  guardian  String?
+  contactNo String?
+  sectionId Int
+  section   Section       @relation(fields: [sectionId], references: [id])
+  status    LearnerStatus @default(ACTIVE)
+  avatarHue Int           @default(210)
+  createdAt DateTime      @default(now())
+
+  attendance AttendanceRecord[]
+  scores     AssessmentScore[]
+  alerts     Alert[]
+}
+
+/// Daily time record: one row per learner, per class period (ClassSchedule), per date.
+/// Day-level status (absent all day, partial day, late) is derived from these rows.
+model AttendanceRecord {
+  id           Int              @id @default(autoincrement())
+  learnerId    Int
+  learner      Learner          @relation(fields: [learnerId], references: [id], onDelete: Cascade)
+  scheduleId   Int
+  schedule     ClassSchedule    @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  date         DateTime         @db.Date
+  status       AttendanceStatus
+  /// Actual arrival time "HH:mm" for PRESENT / LATE
+  timeIn       String?
+  remarks      String?
+  recordedById Int?
+  recordedBy   User?            @relation(fields: [recordedById], references: [id], onDelete: SetNull)
+  recordedAt   DateTime         @default(now())
+
+  @@unique([learnerId, scheduleId, date])
+  @@index([date])
+  @@index([scheduleId, date])
+}
+
+model Competency {
+  id           Int     @id @default(autoincrement())
+  code         String  @unique
+  learningArea String
+  title        String  @db.Text
+  quarter      Int
+  active       Boolean @default(true)
+
+  assessments Assessment[]
+  alerts      Alert[]
+}
+
+model Assessment {
+  id           Int            @id @default(autoincrement())
+  title        String
+  type         AssessmentType
+  competencyId Int
+  competency   Competency     @relation(fields: [competencyId], references: [id], onDelete: Cascade)
+  sectionId    Int
+  section      Section        @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  date         DateTime       @db.Date
+  maxScore     Int
+  quarter      Int
+  createdById  Int?
+  createdBy    User?          @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt    DateTime       @default(now())
+
+  scores AssessmentScore[]
+
+  @@index([sectionId, date])
+}
+
+model AssessmentScore {
+  id           Int        @id @default(autoincrement())
+  assessmentId Int
+  assessment   Assessment @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  learnerId    Int
+  learner      Learner    @relation(fields: [learnerId], references: [id], onDelete: Cascade)
+  score        Float
+
+  @@unique([assessmentId, learnerId])
+}
+
+/// Instructional alerts are generated from attendance/assessment rules and
+/// identified by a stable `key`, so re-running the rules updates instead of duplicating.
+model Alert {
+  id            Int         @id @default(autoincrement())
+  key           String      @unique
+  type          AlertType
+  level         AlertLevel
+  title         String
+  detail        String      @db.Text
+  action        String      @db.Text
+  learnerId     Int?
+  learner       Learner?    @relation(fields: [learnerId], references: [id], onDelete: Cascade)
+  sectionId     Int?
+  section       Section?    @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  competencyId  Int?
+  competency    Competency? @relation(fields: [competencyId], references: [id], onDelete: Cascade)
+  status        AlertStatus @default(OPEN)
+  followUpNote  String?     @db.Text
+  followUpById  Int?
+  followUpBy    User?       @relation(fields: [followUpById], references: [id], onDelete: SetNull)
+  followUpAt    DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@index([status, level])
+}
+
+model ActivityLog {
+  id        Int      @id @default(autoincrement())
+  userId    Int?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String
+  entity    String
+  details   String?  @db.Text
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}

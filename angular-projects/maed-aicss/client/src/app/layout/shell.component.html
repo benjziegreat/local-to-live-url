@@ -1,0 +1,82 @@
+@if (auth.user(); as user) {
+  @if (drawer()) {
+    <div class="scrim" (click)="drawer.set(false)"></div>
+  }
+  <aside class="sidebar" [class.open]="drawer()">
+    <div class="brand">
+      <app-logo [size]="64" />
+      <strong>AICSS</strong>
+      <small>Attendance-Informed<br />Competency Support System</small>
+      <span class="portal">{{ portal() }}</span>
+    </div>
+
+    <nav aria-label="Main">
+      @for (item of items(); track item.path) {
+        <a class="nav-item" [routerLink]="item.path" routerLinkActive="active">
+          <app-icon [name]="item.icon" [size]="20" />
+          <span>{{ item.label }}</span>
+          @if (item.badge && nav.openAlerts()) {
+            <span class="count-pill">{{ nav.openAlerts() }}</span>
+          }
+        </a>
+      }
+    </nav>
+
+    <div class="spacer"></div>
+
+    <button type="button" class="nav-item" (click)="auth.logout()">
+      <app-icon name="logout" [size]="20" /> <span>Log Out</span>
+    </button>
+    <div class="wave" aria-hidden="true"></div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <button type="button" class="btn ghost icon-only menu-btn" (click)="drawer.set(true)" aria-label="Open menu">
+        <app-icon name="menu" />
+      </button>
+      <div class="context">
+        <app-icon name="school" [size]="18" />
+        <span>{{ school().schoolLevel }}</span>
+        @if (school().academicYear) {
+          <span class="dot">•</span><span>AY {{ school().academicYear }}</span>
+        }
+      </div>
+      <div class="spacer"></div>
+      <a class="bell" routerLink="/alerts" [attr.aria-label]="nav.openAlerts() + ' open alerts'">
+        <app-icon name="bell" [size]="22" />
+        @if (nav.openAlerts()) {
+          <span class="count-pill">{{ nav.openAlerts() > 99 ? '99+' : nav.openAlerts() }}</span>
+        }
+      </a>
+      <div class="user-menu">
+        <button type="button" class="who" (click)="menu.set(!menu())" [attr.aria-expanded]="menu()">
+          <app-avatar [name]="user.name" [hue]="user.avatarHue" [size]="36" />
+          <span class="names">
+            <strong>{{ user.name }}</strong>
+            <small>{{ user.role === 'ADMIN' ? 'Administrator' : 'Teacher' }}</small>
+          </span>
+          <app-icon name="chevron-down" [size]="16" />
+        </button>
+        @if (menu()) {
+          <div class="menu-pop">
+            <div class="menu-head">
+              <strong>{{ user.name }}</strong>
+              <small>{{ user.email }}</small>
+            </div>
+            <a routerLink="/settings"><app-icon name="settings" [size]="16" /> Settings</a>
+            <button type="button" (click)="toggleTheme()">
+              <app-icon [name]="theme() === 'dark' ? 'sun' : 'moon'" [size]="16" /> {{ theme() === 'dark' ? 'Light mode' : 'Dark mode' }}
+            </button>
+            <button type="button" (click)="auth.logout()"><app-icon name="logout" [size]="16" /> Log out</button>
+          </div>
+          <div class="menu-scrim" (click)="menu.set(false)"></div>
+        }
+      </div>
+    </header>
+
+    <main class="content">
+      <router-outlet />
+    </main>
+  </div>
+}

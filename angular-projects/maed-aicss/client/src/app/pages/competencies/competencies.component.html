@@ -1,0 +1,221 @@
+<div class="page">
+  <header class="page-head">
+    <h1><app-icon name="target" [size]="28" /> Competencies</h1>
+    <div class="tools">
+      @if (data(); as d) {
+        @if (d.sections.length > 1) {
+          <select class="input" [(ngModel)]="sectionId" (ngModelChange)="load()" aria-label="Section">
+            <option [ngValue]="null">All sections</option>
+            @for (s of d.sections; track s.id) {
+              <option [ngValue]="s.id">{{ s.name }}</option>
+            }
+          </select>
+        }
+      }
+      <select class="input" [(ngModel)]="quarter" (ngModelChange)="load()" aria-label="Quarter">
+        <option [ngValue]="null">All quarters</option>
+        @for (q of [1, 2, 3, 4]; track q) {
+          <option [ngValue]="q">Quarter {{ q }}</option>
+        }
+      </select>
+      <button type="button" class="btn primary" (click)="openEdit()"><app-icon name="plus" [size]="16" /> Add Competency</button>
+    </div>
+  </header>
+
+  @if (error()) {
+    <div class="card empty">{{ error() }}</div>
+  } @else if (data()) {
+    @let d = data()!;
+    <section class="grid grid-4">
+      <div class="kpi-tile compact green">
+        <span class="ico"><app-icon name="check-circle" [size]="24" /></span>
+        <div><div class="val">{{ pct(d.kpis.onTrack, 0) }}</div><div class="lbl">On Track (mastered)</div></div>
+      </div>
+      <div class="kpi-tile compact orange">
+        <span class="ico"><app-icon name="alert" [size]="24" /></span>
+        <div><div class="val">{{ pct(d.kpis.monitor, 0) }}</div><div class="lbl">Monitor (in progress)</div></div>
+      </div>
+      <div class="kpi-tile compact red">
+        <span class="ico"><app-icon name="alert-octagon" [size]="24" /></span>
+        <div><div class="val">{{ pct(d.kpis.needsSupport, 0) }}</div><div class="lbl">Needs Support</div></div>
+      </div>
+      <div class="kpi-tile compact purple">
+        <span class="ico"><app-icon name="chart" [size]="24" /></span>
+        <div><div class="val">{{ pct(d.kpis.targetCoverage, 0) }}</div><div class="lbl">Target Coverage</div></div>
+      </div>
+    </section>
+
+    <section class="grid grid-side">
+      <article class="panel">
+        <header class="panel-head light">
+          <h2><app-icon name="trend" /> Competency Progress</h2>
+          <span class="muted small">Mastery target {{ d.masteryTarget }}%</span>
+        </header>
+        <div class="panel-body">
+          <ul class="area-list">
+            @for (a of d.areas; track a.learningArea; let i = $index) {
+              <li [class.focus]="area()?.learningArea === a.learningArea" (click)="focusArea.set(a.learningArea)">
+                <span class="name">{{ a.learningArea }}</span>
+                <div class="progress"><span [class]="'c-' + (i % 6)" [style.width.%]="a.masteryRate ?? 0"></span></div>
+                <b>{{ a.masteryRate === null ? '-' : a.masteryRate.toFixed(0) + '%' }}</b>
+                <span class="badge" [class]="AREA_TONE[a.status]">{{ AREA_LABEL[a.status] }}</span>
+              </li>
+            } @empty {
+              <li class="empty">No competencies yet.</li>
+            }
+          </ul>
+        </div>
+      </article>
+      <article class="panel">
+        <header class="panel-head light">
+          <h2>Competency Details</h2>
+          @if (d.areas.length) {
+            <select class="input" [ngModel]="area()?.learningArea" (ngModelChange)="focusArea.set($event)" aria-label="Learning area">
+              @for (a of d.areas; track a.learningArea) {
+                <option [value]="a.learningArea">{{ a.learningArea }}</option>
+              }
+            </select>
+          }
+        </header>
+        <div class="panel-body">
+          @if (area(); as a) {
+            @if (areaRing().length) {
+              <app-ring-chart [segments]="areaRing()" [center]="pct(a.masteryRate, 0)" caption="Mastered" [ariaLabel]="a.learningArea + ' mastery'" />
+              <p class="muted small center">{{ a.competencies }} competencies · {{ a.assessed }} learner results</p>
+            } @else {
+              <p class="empty">No assessment results for {{ a.learningArea }} yet.</p>
+            }
+          }
+        </div>
+      </article>
+    </section>
+
+    <article class="panel">
+      <header class="panel-head">
+        <h2><app-icon name="list" /> Competency List &amp; Learning Gaps</h2>
+        <select class="input" [ngModel]="areaFilter()" (ngModelChange)="areaFilter.set($event)" aria-label="Filter learning area">
+          <option value="">All learning areas</option>
+          @for (a of learningAreas(); track a) {
+            <option [value]="a">{{ a }}</option>
+          }
+        </select>
+      </header>
+      <div class="table-wrap">
+        <table class="table stacked">
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>Competency</th>
+              <th>Qtr</th>
+              <th class="num">Assessments</th>
+              <th>Mastery</th>
+              <th>Gaps</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (c of list(); track c.id) {
+              <tr [class.inactive]="!c.active">
+                <td data-label="Code"><strong class="nowrap">{{ c.code }}</strong><br /><span class="muted small">{{ c.learningArea }}</span></td>
+                <td data-label="Competency" class="title">{{ c.title }}@if (!c.active) {<span class="badge">Inactive</span>}</td>
+                <td data-label="Quarter">Q{{ c.quarter }}</td>
+                <td data-label="Assessments" class="num">{{ c.assessments }}</td>
+                <td data-label="Mastery" class="mastery">
+                  <div class="progress thin"><span [style.width.%]="c.masteryRate ?? 0"></span></div>
+                  <span>{{ pct(c.masteryRate, 0) }}</span>
+                </td>
+                <td data-label="Gaps" class="nowrap">
+                  @if (c.assessed) {
+                    <span class="muted small">{{ c.inProgress }} in progress · <b class="crit">{{ c.needsSupport }}</b> need support</span>
+                  } @else {
+                    <span class="muted small">Not assessed</span>
+                  }
+                </td>
+                <td data-label="Status"><span class="badge" [class]="AREA_TONE[status(c)]">{{ AREA_LABEL[status(c)] }}</span></td>
+                <td class="actions">
+                  <button type="button" class="btn sm" (click)="openDetail(c)" [disabled]="!c.assessed"><app-icon name="eye" [size]="15" /> Learners</button>
+                  <button type="button" class="btn sm icon-only" (click)="openEdit(c)" aria-label="Edit"><app-icon name="edit" [size]="15" /></button>
+                  @if (auth.isAdmin()) {
+                    <button type="button" class="btn sm icon-only" (click)="remove(c)" aria-label="Delete"><app-icon name="trash" [size]="15" /></button>
+                  }
+                </td>
+              </tr>
+            } @empty {
+              <tr><td colspan="8" class="empty">No competencies match.</td></tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </article>
+  } @else {
+    <div class="skeleton" style="min-height: 400px"></div>
+  }
+</div>
+
+<app-modal [open]="detailOpen()" [title]="detail() ? detail()!.competency.code + ': learner mastery' : 'Loading…'" [width]="760" (closed)="detailOpen.set(false)">
+  @if (detail(); as d) {
+    <p class="lead">{{ d.competency.title }} <span class="muted">({{ d.competency.learningArea }}, Q{{ d.competency.quarter }})</span></p>
+    <div class="table-wrap">
+      <table class="table">
+        <thead><tr><th>Learner</th><th>Section</th><th class="num">Average</th><th>Mastery</th></tr></thead>
+        <tbody>
+          @for (l of d.learners; track l.id) {
+            <tr>
+              <td><a [routerLink]="['/learners', l.id]">{{ l.name }}</a><br /><span class="muted small">{{ l.learnerNo }}</span></td>
+              <td>{{ l.section }}</td>
+              <td class="num">{{ pct(l.average) }}</td>
+              <td><span class="badge" [class]="BAND_TONE[l.band]">{{ BAND_LABEL[l.band] }}</span></td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+    <h3 class="sub">Assessments</h3>
+    <ul class="mini">
+      @for (a of d.assessments; track a.id) {
+        <li>{{ fmtDate(a.date) }} · {{ a.title }} · {{ TYPE_LABEL[a.type] }} · {{ a.section }} · /{{ a.maxScore }}</li>
+      }
+    </ul>
+  } @else {
+    <div class="skeleton"></div>
+  }
+</app-modal>
+
+<app-modal [open]="editOpen()" [title]="editingId ? 'Edit Competency' : 'Add Competency'" (closed)="editOpen.set(false)">
+  <form class="form-grid" (ngSubmit)="save()">
+    <label class="field">
+      <span>Code</span>
+      <input class="input" name="code" [(ngModel)]="form.code" required placeholder="e.g. OC-Q3-01" />
+    </label>
+    <label class="field">
+      <span>Quarter</span>
+      <select class="input" name="quarter" [(ngModel)]="form.quarter">
+        @for (q of [1, 2, 3, 4]; track q) {
+          <option [ngValue]="q">Quarter {{ q }}</option>
+        }
+      </select>
+    </label>
+    <label class="field full">
+      <span>Learning area</span>
+      <input class="input" name="learningArea" [(ngModel)]="form.learningArea" required list="areas" placeholder="e.g. Oral Communication" />
+      <datalist id="areas">
+        @for (a of learningAreas(); track a) {
+          <option [value]="a"></option>
+        }
+      </datalist>
+    </label>
+    <label class="field full">
+      <span>Competency (learning competency statement)</span>
+      <textarea class="input" name="title" [(ngModel)]="form.title" required></textarea>
+    </label>
+    <label class="check full">
+      <span class="switch"><input type="checkbox" name="active" [(ngModel)]="form.active" /><span></span></span>
+      Actively monitored
+    </label>
+    <div class="full row" style="justify-content: flex-end">
+      <button type="button" class="btn" (click)="editOpen.set(false)">Cancel</button>
+      <button type="submit" class="btn primary" [disabled]="saving()">{{ saving() ? 'Saving…' : 'Save' }}</button>
+    </div>
+  </form>
+</app-modal>

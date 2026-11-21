@@ -1,0 +1,240 @@
+<div class="page">
+  <header class="page-head">
+    <h1><app-icon name="calendar-check" [size]="28" /> Attendance</h1>
+    <div class="tools">
+      @if (data(); as d) {
+        @if (d.sections.length > 1) {
+          <select class="input" [(ngModel)]="sectionId" (ngModelChange)="load()" aria-label="Section">
+            <option [ngValue]="null">All sections</option>
+            @for (s of d.sections; track s.id) {
+              <option [ngValue]="s.id">{{ s.name }}</option>
+            }
+          </select>
+        }
+      }
+      <select class="input" [(ngModel)]="range" (ngModelChange)="load()" aria-label="Range">
+        <option value="week">This Week</option>
+        <option value="month">This Month</option>
+      </select>
+      <button type="button" class="btn" (click)="exportRecords()"><app-icon name="download" [size]="16" /> Export</button>
+      <button type="button" class="btn primary" (click)="openRecorder()"><app-icon name="plus" [size]="16" /> Record Class Attendance</button>
+    </div>
+  </header>
+
+  @if (error()) {
+    <div class="card empty">{{ error() }}</div>
+  } @else if (data()) {
+    @let d = data()!;
+    <section class="grid grid-4">
+      <div class="kpi-tile compact">
+        <span class="ico"><app-icon name="users" [size]="24" /></span>
+        <div><div class="val">{{ d.kpis.learners }}</div><div class="lbl">Total Learners</div></div>
+      </div>
+      <div class="kpi-tile compact green">
+        <span class="ico"><app-icon name="check" [size]="24" /></span>
+        <div><div class="val">{{ pct(d.kpis.rate) }}</div><div class="lbl">Class attendance ({{ range === 'week' ? 'week' : 'month' }})</div></div>
+      </div>
+      <div class="kpi-tile compact orange">
+        <span class="ico"><app-icon name="clock" [size]="24" /></span>
+        <div><div class="val">{{ d.kpis.absent }}</div><div class="lbl">Absent all day · {{ fmtDate(d.kpis.latestDate) }}</div></div>
+      </div>
+      <div class="kpi-tile compact purple">
+        <span class="ico"><app-icon name="hourglass" [size]="24" /></span>
+        <div><div class="val">{{ d.kpis.late }} <small class="sub-val">/ {{ d.kpis.partial }}</small></div><div class="lbl">Late / missed periods · {{ fmtDate(d.kpis.latestDate) }}</div></div>
+      </div>
+    </section>
+
+    <section class="grid grid-main">
+      <article class="panel">
+        <header class="panel-head light"><h2><app-icon name="trend" /> Attendance Trend</h2></header>
+        <div class="panel-body"><app-line-chart [points]="trendPoints()" [showValues]="range === 'week'" /></div>
+      </article>
+      <article class="panel">
+        <header class="panel-head light"><h2><app-icon name="chart" /> Attendance Summary</h2></header>
+        <div class="panel-body center-body">
+          @if (summary().length) {
+            <app-ring-chart [segments]="summary()" [center]="pct(d.summary.rate)" caption="Attendance" ariaLabel="Attendance breakdown" />
+            <p class="muted small">{{ d.summary.total }} learner-days · rate = class periods attended ({{ d.summary.periodsAttended }} of {{ d.summary.periodsTotal }}) · {{ d.summary.partial }} day(s) with missed periods</p>
+          } @else {
+            <p class="empty">No records in this period.</p>
+          }
+        </div>
+      </article>
+    </section>
+
+    <section class="grid grid-main">
+      <article class="panel">
+        <header class="panel-head light"><h2><app-icon name="list" /> Daily Attendance Record</h2></header>
+        <div class="table-wrap">
+          <table class="table stacked">
+            <thead>
+              <tr>
+                <th>Date</th><th>Day</th><th class="num">Present</th><th class="num">Late</th><th class="num">Absent all day</th>
+                <th class="num">Excused</th><th class="num" title="In school but absent from at least one class period">Missed periods</th><th class="num">Class rate</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (r of d.records; track r.date) {
+                <tr>
+                  <td data-label="Date">{{ fmtDate(r.date) }}</td>
+                  <td data-label="Day">{{ weekday(r.date) }}</td>
+                  <td data-label="Present" class="num">{{ r.present }}</td>
+                  <td data-label="Late" class="num">{{ r.late }}</td>
+                  <td data-label="Absent all day" class="num">{{ r.absent }}</td>
+                  <td data-label="Excused" class="num">{{ r.excused }}</td>
+                  <td data-label="Missed periods" class="num">{{ r.partial }}</td>
+                  <td data-label="Class rate" class="num"><strong>{{ pct(r.rate) }}</strong></td>
+                </tr>
+              } @empty {
+                <tr><td colspan="8" class="empty">No attendance recorded yet.</td></tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      </article>
+      <article class="panel">
+        <header class="panel-head light">
+          <h2><app-icon name="calendar" /> Monthly Summary</h2>
+          <span class="row-wrap">
+            <a class="link" routerLink="/reports" [queryParams]="{ type: 'dtr' }">DTR</a>
+            <a class="link" routerLink="/reports" [queryParams]="{ type: 'sf2' }">SF2 report <app-icon name="arrow-right" [size]="16" /></a>
+          </span>
+        </header>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>Month</th><th class="num">Days</th><th class="num">Absences</th><th class="num">Rate</th></tr></thead>
+            <tbody>
+              @for (m of d.monthly; track m.month) {
+                <tr>
+                  <td>{{ monthLabel(m.month, true) }}</td>
+                  <td class="num">{{ m.days }}</td>
+                  <td class="num">{{ m.absent }}</td>
+                  <td class="num"><strong>{{ pct(m.rate) }}</strong></td>
+                </tr>
+              }
+              <tr class="total">
+                <td>School year</td>
+                <td class="num">{{ syDays() }}</td>
+                <td class="num">{{ d.schoolYear.absent }}</td>
+                <td class="num"><strong>{{ pct(d.schoolYear.rate) }}</strong></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+  } @else {
+    <div class="grid grid-4">
+      <div class="skeleton" style="min-height: 84px"></div><div class="skeleton" style="min-height: 84px"></div>
+      <div class="skeleton" style="min-height: 84px"></div><div class="skeleton" style="min-height: 84px"></div>
+    </div>
+    <div class="skeleton" style="min-height: 300px"></div>
+  }
+</div>
+
+<app-modal [open]="recorderOpen()" title="Daily Time Record: Class Attendance" [width]="900" (closed)="recorderOpen.set(false)">
+  @if (!selected()) {
+    <!-- Step 1: date and class period -->
+    <div class="rec-bar">
+      <label class="field">
+        <span>Date</span>
+        <input class="input" type="date" [(ngModel)]="recDate" [max]="today" (change)="loadPeriods()" />
+      </label>
+      <p class="muted small">Choose a class period. You can record your own classes and your advisory section's classes.</p>
+    </div>
+    @if (periods() === null) {
+      <div class="skeleton" style="min-height: 160px"></div>
+    } @else if (!periods()!.length) {
+      <p class="empty">No classes you can record on {{ recDay() || 'this day' }}.</p>
+    } @else {
+      @for (g of periodGroups(); track g.section) {
+        <h3 class="grp">{{ g.section }} · {{ recDay() }}</h3>
+        <div class="period-grid">
+          @for (p of g.list; track p.id) {
+            <button type="button" class="period" [class.done]="p.recorded && p.recorded >= (p.learners ?? 0)" [class.mine]="p.mine" (click)="choose(p)">
+              <span class="time">{{ to12h(p.startTime) }} – {{ to12h(p.endTime) }}</span>
+              <strong>{{ p.subject }}</strong>
+              <span class="meta"><app-icon name="home" [size]="13" /> {{ p.room }}</span>
+              <span class="meta"><app-icon name="user" [size]="13" /> {{ p.teacher ?? 'No teacher' }}</span>
+              <span class="badge" [class.success]="p.recorded && p.recorded >= (p.learners ?? 0)" [class.warning]="p.recorded && p.recorded < (p.learners ?? 0)">
+                {{ p.recorded ? p.recorded + '/' + p.learners + ' recorded' : 'Not recorded' }}
+              </span>
+            </button>
+          }
+        </div>
+      }
+    }
+  } @else {
+    <!-- Step 2: mark learners for the chosen period -->
+    @let p = selected()!;
+    <div class="period-head">
+      <button type="button" class="btn sm" (click)="backToPeriods()"><app-icon name="chevron-left" [size]="15" /> Periods</button>
+      <div class="ph-info">
+        <strong>{{ p.subject }}</strong>
+        <span>{{ p.section }} · {{ fmtDate(recDate) }} ({{ recDay() }}) · {{ to12h(p.startTime) }}–{{ to12h(p.endTime) }} · {{ p.room }}{{ p.teacher ? ' · ' + p.teacher : '' }}</span>
+      </div>
+    </div>
+  }
+
+  @if (selected() && roster(); as r) {
+    @if (r.recorded) {
+      <p class="note"><app-icon name="info" [size]="16" /> This period was already recorded. Saving will update it.</p>
+    }
+    <div class="row-wrap tools-row">
+      <button type="button" class="btn sm" (click)="markAllPresent()"><app-icon name="check" [size]="15" /> Mark unmarked present ({{ to12h(r.period.startTime) }})</button>
+      @if (hasEarlier()) {
+        <button type="button" class="btn sm" (click)="copyPrevious()"><app-icon name="history" [size]="15" /> Copy from previous period</button>
+      }
+      <span class="muted small">Time in after {{ r.graceMinutes }} min past the start → Late</span>
+    </div>
+    <div class="tally">
+      <span class="badge success">Present {{ tally()['PRESENT'] }}</span>
+      <span class="badge warning">Late {{ tally()['LATE'] }}</span>
+      <span class="badge critical">Absent {{ tally()['ABSENT'] }}</span>
+      <span class="badge info">Excused {{ tally()['EXCUSED'] }}</span>
+      @if (tally()['NONE']) {
+        <span class="badge">Unmarked {{ tally()['NONE'] }}</span>
+      }
+    </div>
+    <ul class="roster">
+      @for (l of r.learners; track l.id; let i = $index) {
+        <li>
+          <span class="no">{{ i + 1 }}</span>
+          <app-avatar [name]="l.name" [hue]="l.avatarHue" [size]="32" />
+          <div class="who">
+            <strong>{{ l.name }}</strong>
+            <small>
+              {{ l.learnerNo }} · {{ l.sex }}
+              @if (l.earlier.length) {
+                <span class="earlier" title="Earlier periods today">
+                  @for (e of l.earlier; track e.startTime) {
+                    <i [class]="ATT_TONE[e.status]" [title]="to12h(e.startTime) + ' ' + e.subject + ': ' + ATT_LABEL[e.status]"></i>
+                  }
+                </span>
+              }
+            </small>
+          </div>
+          <div class="seg" role="radiogroup" [attr.aria-label]="'Attendance for ' + l.name">
+            @for (s of STATUSES; track s) {
+              <button type="button" [class.on]="l.status === s" [class]="ATT_TONE[s]" (click)="mark(l.id, s)" [attr.aria-pressed]="l.status === s" [title]="ATT_LABEL[s]">{{ ATT_SHORT[s] }}</button>
+            }
+          </div>
+          <input class="input time-in" type="time" [ngModel]="l.timeIn" (ngModelChange)="setTimeIn(l.id, $event)"
+                 [disabled]="l.status === 'ABSENT' || l.status === 'EXCUSED'" [attr.aria-label]="'Time in for ' + l.name" title="Time in" />
+          @if (l.status && l.status !== 'PRESENT') {
+            <input class="input remarks" placeholder="Remarks" [ngModel]="l.remarks" (ngModelChange)="setRemarks(l.id, $event)" />
+          }
+        </li>
+      } @empty {
+        <li class="empty">No active learners in this section.</li>
+      }
+    </ul>
+    <div class="rec-actions">
+      <span class="muted small">P = Present · L = Late · A = Absent · E = Excused · dots = earlier periods today</span>
+      <button type="button" class="btn" (click)="backToPeriods()">Cancel</button>
+      <button type="button" class="btn primary" [disabled]="saving() || !r.learners.length" (click)="save()">{{ saving() ? 'Saving…' : 'Save Period Attendance' }}</button>
+    </div>
+  } @else if (selected()) {
+    <div class="skeleton"></div>
+  }
+</app-modal>

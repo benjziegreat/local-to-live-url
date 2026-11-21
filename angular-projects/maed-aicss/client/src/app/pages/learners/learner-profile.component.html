@@ -1,0 +1,143 @@
+<div class="page">
+  <a class="link back" routerLink="/learners"><app-icon name="chevron-left" [size]="16" /> Back to learners</a>
+
+  @if (error()) {
+    <div class="card empty">{{ error() }}</div>
+  } @else if (data()) {
+    @let d = data()!;
+    <section class="card hero">
+      <app-avatar [name]="d.learner.name" [hue]="d.learner.avatarHue" [size]="84" />
+      <div class="id">
+        <span class="eyebrow">{{ d.learner.learnerNo }}{{ d.learner.lrn ? ' · LRN ' + d.learner.lrn : '' }}</span>
+        <h1>{{ d.learner.name }}</h1>
+        <p>{{ d.learner.section }} · {{ d.learner.strand }}{{ d.learner.room ? ' · ' + d.learner.room : '' }} · Adviser: {{ d.learner.teacher ?? '-' }}</p>
+        <p class="muted small">
+          {{ d.learner.sex === 'M' ? 'Male' : 'Female' }}
+          @if (d.learner.birthDate) { · Born {{ fmtDate(d.learner.birthDate) }} }
+          @if (d.learner.guardian) { · Guardian: {{ d.learner.guardian }} }
+          @if (d.learner.contactNo) { · {{ d.learner.contactNo }} }
+        </p>
+      </div>
+      <div class="status">
+        @if (d.learner.status === 'ARCHIVED') {
+          <span class="badge lg">Archived</span>
+        } @else {
+          <span class="badge lg" [class]="MON_TONE[d.learner.monitoring]">{{ MON_LABEL[d.learner.monitoring] }}</span>
+        }
+      </div>
+    </section>
+
+    <section class="grid grid-4">
+      <div class="kpi-tile compact green">
+        <span class="ico"><app-icon name="calendar-check" [size]="24" /></span>
+        <div><div class="val">{{ pct(d.learner.attendanceRate) }}</div><div class="lbl">Attendance rate</div></div>
+      </div>
+      <div class="kpi-tile compact orange">
+        <span class="ico"><app-icon name="clock" [size]="24" /></span>
+        <div><div class="val">{{ d.learner.absent }}</div><div class="lbl">Days absent · {{ d.learner.recentAbsences }} in last 30 days</div></div>
+      </div>
+      <div class="kpi-tile compact">
+        <span class="ico"><app-icon name="clipboard" [size]="24" /></span>
+        <div><div class="val">{{ pct(d.learner.assessmentAvg) }}</div><div class="lbl">Assessment avg · {{ d.learner.descriptor }}</div></div>
+      </div>
+      <div class="kpi-tile compact purple">
+        <span class="ico"><app-icon name="target" [size]="24" /></span>
+        <div><div class="val">{{ d.competencies.length }}</div><div class="lbl">Competencies assessed</div></div>
+      </div>
+    </section>
+
+    <p class="rec"><app-icon name="bulb" [size]="18" /> <strong>Recommended action:</strong> {{ d.learner.action }}</p>
+
+    <section class="grid grid-main">
+      <article class="panel">
+        <header class="panel-head light"><h2><app-icon name="chart" /> Attendance History</h2></header>
+        <div class="panel-body"><app-bar-chart [points]="monthly()" ariaLabel="Monthly attendance" /></div>
+      </article>
+      <article class="panel">
+        <header class="panel-head light">
+          <h2><app-icon name="calendar" /> Absences, Lates &amp; Excuses</h2>
+          <span class="muted small">{{ d.attendance.partialDays }} partial day(s) · {{ d.attendance.periodsMissed }} period(s) missed</span>
+        </header>
+        <ul class="list scroll">
+          @for (r of d.attendance.recent; track r.date + r.startTime) {
+            <li class="list-item">
+              <span class="badge" [class]="ATT_TONE[r.status]">{{ ATT_LABEL[r.status] }}</span>
+              <div class="grow">
+                <strong class="small">{{ fmtDate(r.date) }} · {{ r.startTime }}–{{ r.endTime }}</strong>
+                <p class="muted small">{{ r.subject }} · {{ r.room }}{{ r.timeIn ? ' · in ' + r.timeIn : '' }}</p>
+              </div>
+              <span class="muted small">{{ r.remarks }}</span>
+            </li>
+          } @empty {
+            <li class="empty">Perfect attendance so far.</li>
+          }
+        </ul>
+      </article>
+    </section>
+
+    <section class="grid grid-2">
+      <article class="panel">
+        <header class="panel-head light"><h2><app-icon name="target" /> Competency Mastery</h2></header>
+        <ul class="list">
+          @for (c of d.competencies; track c.id) {
+            <li class="list-item">
+              <div class="grow">
+                <strong>{{ c.code }}</strong> <span class="muted small">{{ c.learningArea }}</span>
+                <div class="progress thin"><span [style.width.%]="c.average" [style.background]="c.band === 'MASTERED' ? 'var(--success)' : c.band === 'IN_PROGRESS' ? 'var(--warning)' : 'var(--critical)'"></span></div>
+              </div>
+              <b class="nowrap">{{ pct(c.average, 0) }}</b>
+              <span class="badge" [class]="BAND_TONE[c.band]">{{ BAND_LABEL[c.band] }}</span>
+            </li>
+          } @empty {
+            <li class="empty">No competency results yet.</li>
+          }
+        </ul>
+      </article>
+      <article class="panel">
+        <header class="panel-head light"><h2><app-icon name="bell" /> Instructional Alerts</h2></header>
+        <ul class="list">
+          @for (a of d.alerts; track a.id) {
+            <li class="list-item top">
+              <span class="badge" [class]="LEVEL_TONE[a.level]">{{ LEVEL_LABEL[a.level] }}</span>
+              <div class="grow">
+                <strong>{{ a.title }}</strong>
+                <p class="muted small">{{ a.action }}</p>
+                @if (a.followUpNote) {
+                  <p class="small note">{{ a.followUpNote }} <span class="muted">({{ a.followUpBy ?? 'System' }})</span></p>
+                }
+              </div>
+              <span class="badge" [class]="ST_TONE[a.status]">{{ ST_LABEL[a.status] }}</span>
+            </li>
+          } @empty {
+            <li class="empty">No alerts for this learner.</li>
+          }
+        </ul>
+      </article>
+    </section>
+
+    <article class="panel">
+      <header class="panel-head"><h2><app-icon name="clipboard" /> Academic Performance</h2></header>
+      <div class="table-wrap">
+        <table class="table stacked">
+          <thead><tr><th>Date</th><th>Assessment</th><th>Competency</th><th class="num">Score</th><th class="num">%</th></tr></thead>
+          <tbody>
+            @for (a of d.assessments; track a.id) {
+              <tr>
+                <td data-label="Date" class="nowrap">{{ fmtDate(a.date) }}</td>
+                <td data-label="Assessment">{{ a.title }} <span class="muted small">· {{ TYPE_LABEL[a.type] }}</span></td>
+                <td data-label="Competency">{{ a.competency }} <span class="muted small">· {{ a.learningArea }}</span></td>
+                <td data-label="Score" class="num">{{ a.score }}/{{ a.maxScore }}</td>
+                <td data-label="%" class="num"><strong [class.low]="a.percent < 75">{{ pct(a.percent, 0) }}</strong></td>
+              </tr>
+            } @empty {
+              <tr><td colspan="5" class="empty">No assessment results yet.</td></tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </article>
+  } @else {
+    <div class="skeleton" style="min-height: 160px"></div>
+    <div class="skeleton" style="min-height: 300px"></div>
+  }
+</div>

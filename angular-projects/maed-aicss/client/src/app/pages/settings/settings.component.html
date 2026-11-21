@@ -1,0 +1,412 @@
+<div class="page">
+  <header class="page-head">
+    <h1><app-icon name="settings" [size]="28" /> Settings</h1>
+    @if (!auth.isAdmin()) {
+      <p class="muted small">School-wide settings are managed by your administrator.</p>
+    }
+  </header>
+
+  <div class="layout">
+    <nav class="card tabs" aria-label="Settings sections">
+      <button type="button" [class.on]="tab() === 'school'" (click)="tab.set('school')"><app-icon name="school" /> School Configuration</button>
+      <button type="button" [class.on]="tab() === 'monitoring'" (click)="tab.set('monitoring')"><app-icon name="target" /> Monitoring Preferences</button>
+      <button type="button" [class.on]="tab() === 'sections'" (click)="tab.set('sections')"><app-icon name="users" /> Sections &amp; Schedules</button>
+      <button type="button" [class.on]="tab() === 'subjects'" (click)="tab.set('subjects')"><app-icon name="book" /> Subjects</button>
+      @if (auth.isAdmin()) {
+        <button type="button" [class.on]="tab() === 'rooms'" (click)="openRooms()"><app-icon name="calendar" /> Room Schedule</button>
+      }
+      <button type="button" [class.on]="tab() === 'account'" (click)="tab.set('account')"><app-icon name="user" /> My Account</button>
+    </nav>
+
+    <section class="card body">
+      @if (tab() === 'subjects') {
+        <div class="row head">
+          <h2>Subjects</h2>
+          @if (auth.isAdmin()) {
+            <button type="button" class="btn primary sm" (click)="openSubject()"><app-icon name="plus" [size]="15" /> Add Subject</button>
+          }
+        </div>
+        <div class="table-wrap">
+          <table class="table stacked">
+            <thead><tr><th>Code</th><th>Subject</th><th>Type</th><th>Usual room</th><th class="num">Sections</th><th class="num">Classes / wk</th>@if (auth.isAdmin()) {<th></th>}</tr></thead>
+            <tbody>
+              @for (s of subjects(); track s.id) {
+                <tr [class.inactive]="!s.active">
+                  <td data-label="Code" class="nowrap"><strong>{{ s.code }}</strong></td>
+                  <td data-label="Subject">{{ s.name }}</td>
+                  <td data-label="Type">
+                    <span class="badge" [class]="s.kind === 'CORE' ? 'info' : s.kind === 'ELECTIVE' ? 'purple' : 'warning'">{{ KIND_LABEL[s.kind] }}{{ s.track ? ' · ' + s.track : '' }}</span>
+                  </td>
+                  <td data-label="Room">{{ s.defaultRoom ?? 'Section room' }}</td>
+                  <td data-label="Sections" class="num">{{ s.kind === 'ELECTIVE' ? s.sections : '-' }}</td>
+                  <td data-label="Classes / wk" class="num">{{ s.classes }}</td>
+                  @if (auth.isAdmin()) {
+                    <td class="right"><button type="button" class="btn sm icon-only" (click)="openSubject(s)" aria-label="Edit"><app-icon name="edit" [size]="15" /></button></td>
+                  }
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+
+      @if (tab() === 'rooms') {
+        <div class="row head">
+          <h2>Room Schedule</h2>
+          <select class="input day-pick" [ngModel]="roomDay()" (ngModelChange)="roomDay.set($event); loadRooms()" aria-label="Day">
+            @for (d of [1, 2, 3, 4, 5, 6]; track d) {
+              <option [ngValue]="d">{{ DAYS[d] }}</option>
+            }
+          </select>
+        </div>
+        <p class="muted small">Each room can hold only one class per period; the API rejects any booking that overlaps.</p>
+        @if (roomRows() === null) {
+          <div class="skeleton" style="min-height: 200px"></div>
+        } @else if (!roomGrid().length) {
+          <p class="empty">No classes on {{ DAYS[roomDay()] }}.</p>
+        } @else {
+          <div class="table-wrap">
+            <table class="table room-grid">
+              <thead>
+                <tr>
+                  <th>Room</th>
+                  @for (p of PERIODS; track p.start) {
+                    <th [class.brk]="p.kind === 'break'">{{ p.label }}<br /><small>{{ to12h(p.start) }}–{{ to12h(p.end) }}</small></th>
+                  }
+                </tr>
+              </thead>
+              <tbody>
+                @for (r of roomGrid(); track r.room) {
+                  <tr>
+                    <th scope="row">{{ r.room }}</th>
+                    @for (c of r.cells; track $index) {
+                      @if (c === undefined) {
+                        <td class="brk"></td>
+                      } @else if (c) {
+                        <td class="busy" [class.aral]="c.subjectKind === 'PROGRAM'" [class.elec]="c.subjectKind === 'ELECTIVE'">
+                          <strong>{{ c.learningArea }}</strong><small>{{ c.section }}</small>
+                        </td>
+                      } @else {
+                        <td class="free">Free</td>
+                      }
+                    }
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
+      }
+
+      @if (tab() === 'school') {
+        @if (form; as f) {
+          <h2>School Configuration</h2>
+          <form class="form-grid" (ngSubmit)="saveSettings()">
+            <fieldset [disabled]="!auth.isAdmin()" class="form-grid full">
+              <label class="field full"><span>School name</span><input class="input" name="schoolName" [(ngModel)]="f.schoolName" required /></label>
+              <label class="field"><span>School ID</span><input class="input" name="schoolId" [(ngModel)]="f.schoolId" /></label>
+              <label class="field">
+                <span>School level</span>
+                <select class="input" name="schoolLevel" [(ngModel)]="f.schoolLevel">
+                  <option>Senior High School</option>
+                  <option>Junior High School</option>
+                  <option>Integrated School</option>
+                </select>
+              </label>
+              <label class="field"><span>Division</span><input class="input" name="division" [(ngModel)]="f.division" /></label>
+              <label class="field"><span>Region</span><input class="input" name="region" [(ngModel)]="f.region" /></label>
+              <label class="field">
+                <span>Academic year</span>
+                <select class="input" name="academicYear" [(ngModel)]="f.academicYear">
+                  @for (y of years; track y) {
+                    <option [value]="y">{{ y }}</option>
+                  }
+                  @if (!years.includes(f.academicYear)) {
+                    <option [value]="f.academicYear">{{ f.academicYear }}</option>
+                  }
+                </select>
+              </label>
+              <label class="field">
+                <span>Current quarter</span>
+                <select class="input" name="currentQuarter" [(ngModel)]="f.currentQuarter">
+                  @for (q of [1, 2, 3, 4]; track q) {
+                    <option [ngValue]="q">Quarter {{ q }}</option>
+                  }
+                </select>
+              </label>
+            </fieldset>
+            @if (auth.isAdmin()) {
+              <div class="full row end"><button type="submit" class="btn primary" [disabled]="saving()">{{ saving() ? 'Saving…' : 'Save Changes' }}</button></div>
+            }
+          </form>
+        }
+      }
+
+      @if (tab() === 'monitoring') {
+        @if (form; as f) {
+          <h2>Monitoring Preferences</h2>
+          <form (ngSubmit)="saveSettings()">
+            <fieldset [disabled]="!auth.isAdmin()" class="stack">
+              <label class="toggle"><span><strong>Enable Attendance Monitoring</strong><small>Allow teachers to record daily attendance.</small></span><span class="switch"><input type="checkbox" name="ea" [(ngModel)]="f.enableAttendance" /><span></span></span></label>
+              <label class="toggle"><span><strong>Enable Competency Tracking</strong><small>Show competency mastery and learning gaps.</small></span><span class="switch"><input type="checkbox" name="ec" [(ngModel)]="f.enableCompetency" /><span></span></span></label>
+              <label class="toggle"><span><strong>Enable Instructional Alerts</strong><small>Generate alerts from attendance and assessment rules.</small></span><span class="switch"><input type="checkbox" name="el" [(ngModel)]="f.enableAlerts" /><span></span></span></label>
+
+              <div class="form-grid thresholds">
+                <label class="field"><span>Attendance target (%)</span><input class="input" type="number" min="50" max="100" name="at" [(ngModel)]="f.attendanceTarget" /><small>Below this → Monitor; 10 points below → At Risk.</small></label>
+                <label class="field"><span>Mastery / passing score (%)</span><input class="input" type="number" min="50" max="100" name="mt" [(ngModel)]="f.masteryTarget" /><small>DepEd passing grade is 75%.</small></label>
+                <label class="field"><span>Absences that raise a HIGH alert</span><input class="input" type="number" min="1" max="30" name="aa" [(ngModel)]="f.absenceAlertThreshold" /><small>Counted over the last 30 school days.</small></label>
+                <label class="field"><span>Late grace period (minutes)</span><input class="input" type="number" min="0" max="60" name="lg" [(ngModel)]="f.lateGraceMinutes" /><small>Time in later than period start + grace → Late.</small></label>
+                <label class="field"><span>Partial days that raise a "missed classes" alert</span><input class="input" type="number" min="1" max="30" name="mc" [(ngModel)]="f.missedClassThreshold" /><small>Days in school but absent from some periods (last 30 school days).</small></label>
+                <label class="field"><span>Reteach when class mastery below (%)</span><input class="input" type="number" min="10" max="100" name="rt" [(ngModel)]="f.reteachThreshold" /><small>Raises a LOW "needs reteaching" alert.</small></label>
+              </div>
+            </fieldset>
+            @if (auth.isAdmin()) {
+              <div class="row end"><button type="submit" class="btn primary" [disabled]="saving()">{{ saving() ? 'Saving…' : 'Save Settings' }}</button></div>
+            }
+          </form>
+        }
+      }
+
+      @if (tab() === 'sections') {
+        <div class="row head">
+          <h2>{{ auth.isAdmin() ? 'Sections' : 'My Sections' }}</h2>
+          @if (auth.isAdmin()) {
+            <button type="button" class="btn primary sm" (click)="openSection()"><app-icon name="plus" [size]="15" /> Add Section</button>
+          }
+        </div>
+        <div class="table-wrap">
+          <table class="table stacked">
+            <thead>
+              <tr><th>Section</th><th>Strand</th><th>Elective</th><th>Room</th><th>Teacher / Adviser</th><th class="num">Learners</th><th class="num">Classes / wk</th><th></th></tr>
+            </thead>
+            <tbody>
+              @for (s of sections(); track s.id) {
+                <tr>
+                  <td data-label="Section"><strong>{{ s.name }}</strong></td>
+                  <td data-label="Strand">Grade {{ s.gradeLevel }} · {{ s.strand }}</td>
+                  <td data-label="Elective">{{ s.elective ?? '-' }}</td>
+                  <td data-label="Room">{{ s.room ?? '-' }}</td>
+                  <td data-label="Teacher">{{ s.teacher ?? 'Unassigned' }}</td>
+                  <td data-label="Learners" class="num">{{ s.learners }}</td>
+                  <td data-label="Classes / wk" class="num">{{ s.classes }}</td>
+                  <td class="right nowrap">
+                    <button type="button" class="btn sm" (click)="openSchedule(s)"><app-icon name="calendar" [size]="15" /> Schedule</button>
+                    @if (auth.isAdmin()) {
+                      <button type="button" class="btn sm icon-only" (click)="openSection(s)" aria-label="Edit"><app-icon name="edit" [size]="15" /></button>
+                      <button type="button" class="btn sm icon-only" (click)="deleteSection(s)" aria-label="Delete"><app-icon name="trash" [size]="15" /></button>
+                    }
+                  </td>
+                </tr>
+              } @empty {
+                <tr><td colspan="8" class="empty">No sections.</td></tr>
+              }
+            </tbody>
+          </table>
+        </div>
+
+        @if (!auth.isAdmin()) {
+          <h3 class="sub">My Teaching Schedule</h3>
+          @if (mySchedule(); as mine) {
+            @if (mine.length) {
+              <div class="timetable">
+                @for (d of myByDay(); track d.day) {
+                  <section>
+                    <h4>{{ d.day }}</h4>
+                    <ul>
+                      @for (c of d.classes; track c.id) {
+                        <li>
+                          <span class="time">{{ to12h(c.startTime) }} – {{ to12h(c.endTime) }}</span>
+                          <strong>{{ c.learningArea }}</strong>
+                          <span class="muted small">{{ c.section }} · {{ c.room }}</span>
+                        </li>
+                      }
+                    </ul>
+                  </section>
+                }
+              </div>
+            } @else {
+              <p class="empty">No classes are assigned to you yet.</p>
+            }
+          }
+        }
+      }
+
+      @if (tab() === 'account') {
+        <h2>My Account</h2>
+        <form class="form-grid" (ngSubmit)="saveProfile()">
+          <label class="field"><span>First name</span><input class="input" name="fn" [(ngModel)]="profile.firstName" required /></label>
+          <label class="field"><span>Last name</span><input class="input" name="ln" [(ngModel)]="profile.lastName" required /></label>
+          <label class="field full"><span>Email</span><input class="input" [value]="auth.user()?.email" disabled /></label>
+          <div class="full row end"><button type="submit" class="btn primary">Save Profile</button></div>
+        </form>
+        <h3 class="sub">Change password</h3>
+        <form class="form-grid" (ngSubmit)="changePassword()">
+          <label class="field full"><span>Current password</span><input class="input" type="password" name="cur" [(ngModel)]="pw.current" autocomplete="current-password" required /></label>
+          <label class="field"><span>New password</span><input class="input" type="password" name="nxt" [(ngModel)]="pw.next" autocomplete="new-password" minlength="8" required /></label>
+          <label class="field"><span>Confirm new password</span><input class="input" type="password" name="cnf" [(ngModel)]="pw.confirm" autocomplete="new-password" required /></label>
+          <div class="full row end"><button type="submit" class="btn">Change Password</button></div>
+        </form>
+      }
+    </section>
+  </div>
+</div>
+
+<app-modal [open]="!!scheduleSection()" [title]="'Class Schedule · ' + (scheduleSection()?.name ?? '')" [width]="900" (closed)="scheduleSection.set(null)">
+  @if (scheduleSection(); as s) {
+    <p class="muted small">Allocated room: <strong>{{ s.room ?? 'not set' }}</strong> · Elective: {{ s.elective ?? 'none' }} · Adviser: {{ s.teacher ?? 'unassigned' }}</p>
+
+    @if (classForm; as f) {
+      <form class="card class-form" (ngSubmit)="saveClass()">
+        <label class="field">
+          <span>Day</span>
+          <select class="input" name="day" [(ngModel)]="f.dayOfWeek">
+            @for (d of [1, 2, 3, 4, 5, 6]; track d) {
+              <option [ngValue]="d">{{ DAYS[d] }}</option>
+            }
+          </select>
+        </label>
+        <label class="field wide">
+          <span>Period</span>
+          <select class="input" name="period" [ngModel]="f.startTime + '-' + f.endTime" (ngModelChange)="setPeriod($event)">
+            <option value="">Custom time…</option>
+            @for (p of PERIODS; track p.start) {
+              @if (p.kind === 'class') {
+                <option [value]="p.start + '-' + p.end">{{ p.label }} ({{ to12h(p.start) }}–{{ to12h(p.end) }})</option>
+              }
+            }
+          </select>
+        </label>
+        <label class="field"><span>Start</span><input class="input" type="time" name="start" [(ngModel)]="f.startTime" required /></label>
+        <label class="field"><span>End</span><input class="input" type="time" name="end" [(ngModel)]="f.endTime" required /></label>
+        <label class="field wide">
+          <span>Subject</span>
+          <select class="input" name="subject" [(ngModel)]="f.subjectId" (ngModelChange)="subjectPicked($event)" required>
+            <option [ngValue]="null" disabled>Choose…</option>
+            @for (x of sectionSubjects(); track x.id) {
+              <option [ngValue]="x.id">{{ x.name }}{{ x.kind !== 'CORE' ? ' (' + KIND_LABEL[x.kind] + ')' : '' }}</option>
+            }
+          </select>
+        </label>
+        <label class="field wide">
+          <span>Subject teacher</span>
+          <select class="input" name="teacher" [(ngModel)]="f.teacherId">
+            <option [ngValue]="null">Unassigned</option>
+            @for (t of teachers(); track t.id) {
+              <option [ngValue]="t.id">{{ t.name }}</option>
+            }
+          </select>
+        </label>
+        <label class="field"><span>Room</span><input class="input" name="room" [(ngModel)]="f.room" required /></label>
+        <div class="row actions">
+          <button type="button" class="btn sm" (click)="classForm = null">Cancel</button>
+          <button type="submit" class="btn primary sm">{{ classEditing ? 'Update class' : 'Add class' }}</button>
+        </div>
+      </form>
+    } @else if (auth.isAdmin()) {
+      <button type="button" class="btn primary sm add-class" (click)="newClass()"><app-icon name="plus" [size]="15" /> Add class</button>
+    }
+
+    @if (schedule() === null) {
+      <div class="skeleton" style="min-height: 160px"></div>
+    } @else if (!schedule()!.length) {
+      <p class="empty">No classes scheduled yet.</p>
+    } @else {
+      <div class="timetable">
+        @for (d of byDay(); track d.day) {
+          <section>
+            <h4>{{ d.day }}</h4>
+            <ul>
+              @for (c of d.classes; track c.id) {
+                <li [class.editing]="classEditing === c.id && classForm">
+                  <span class="time">{{ to12h(c.startTime) }} – {{ to12h(c.endTime) }}</span>
+                  <strong>{{ c.learningArea }}</strong>
+                  <span class="muted small">{{ c.room }}{{ c.teacher ? ' · ' + c.teacher : '' }}</span>
+                  @if (auth.isAdmin()) {
+                    <span class="tools">
+                      <button type="button" class="btn sm icon-only" (click)="editClass(c)" aria-label="Edit class"><app-icon name="edit" [size]="14" /></button>
+                      <button type="button" class="btn sm icon-only" (click)="deleteClass(c)" aria-label="Remove class"><app-icon name="trash" [size]="14" /></button>
+                    </span>
+                  }
+                </li>
+              }
+            </ul>
+          </section>
+        }
+      </div>
+    }
+  }
+</app-modal>
+
+<app-modal [open]="subjectOpen()" [title]="subjectEditing ? 'Edit Subject' : 'Add Subject'" (closed)="subjectOpen.set(false)">
+  <form class="form-grid" (ngSubmit)="saveSubject()">
+    <label class="field"><span>Code</span><input class="input" name="code" [(ngModel)]="subjectForm.code" required placeholder="e.g. VGD" /></label>
+    <label class="field">
+      <span>Type</span>
+      <select class="input" name="kind" [(ngModel)]="subjectForm.kind">
+        <option value="CORE">Core</option>
+        <option value="ELECTIVE">Elective</option>
+        <option value="PROGRAM">Program</option>
+      </select>
+    </label>
+    <label class="field full"><span>Subject name</span><input class="input" name="name" [(ngModel)]="subjectForm.name" required /></label>
+    @if (subjectForm.kind === 'ELECTIVE') {
+      <label class="field">
+        <span>Track</span>
+        <select class="input" name="track" [(ngModel)]="subjectForm.track">
+          <option value="Academic">Academic</option>
+          <option value="TechPro">TechPro</option>
+        </select>
+      </label>
+    }
+    <label class="field" [class.full]="subjectForm.kind !== 'ELECTIVE'">
+      <span>Usual room</span>
+      <input class="input" name="room" [(ngModel)]="subjectForm.defaultRoom" placeholder="Blank = section's own room" />
+    </label>
+    <label class="check full">
+      <span class="switch"><input type="checkbox" name="active" [(ngModel)]="subjectForm.active" /><span></span></span>
+      Offered this school year
+    </label>
+    <div class="full row end">
+      <button type="button" class="btn" (click)="subjectOpen.set(false)">Cancel</button>
+      <button type="submit" class="btn primary">Save</button>
+    </div>
+  </form>
+</app-modal>
+
+<app-modal [open]="sectionOpen()" [title]="sectionEditing ? 'Edit Section' : 'Add Section'" (closed)="sectionOpen.set(false)">
+  <form class="form-grid" (ngSubmit)="saveSection()">
+    <label class="field full"><span>Section name</span><input class="input" name="name" [(ngModel)]="sectionForm.name" required placeholder="e.g. Grade 11 – STEM B" /></label>
+    <label class="field">
+      <span>Grade level</span>
+      <select class="input" name="grade" [(ngModel)]="sectionForm.gradeLevel">
+        <option [ngValue]="11">Grade 11</option>
+        <option [ngValue]="12">Grade 12</option>
+      </select>
+    </label>
+    <label class="field"><span>Strand</span><input class="input" name="strand" [(ngModel)]="sectionForm.strand" required list="strands" /></label>
+    <label class="field full">
+      <span>Elective / specialization</span>
+      <select class="input" name="elective" [(ngModel)]="sectionForm.electiveId">
+        <option [ngValue]="null">None</option>
+        @for (e of electives(); track e.id) {
+          <option [ngValue]="e.id">{{ e.name }}{{ e.track ? ' · ' + e.track : '' }}</option>
+        }
+      </select>
+    </label>
+    <label class="field full"><span>Allocated room</span><input class="input" name="room" [(ngModel)]="sectionForm.room" placeholder="e.g. Room 201" /><small>The section's advisory / homeroom. Used as the default room for new classes.</small></label>
+    <datalist id="strands"><option value="STEM"></option><option value="ABM"></option><option value="HUMSS"></option><option value="GAS"></option><option value="TVL"></option></datalist>
+    <label class="field full">
+      <span>Teacher / adviser</span>
+      <select class="input" name="teacher" [(ngModel)]="sectionForm.teacherId">
+        <option [ngValue]="null">Unassigned</option>
+        @for (t of teachers(); track t.id) {
+          <option [ngValue]="t.id">{{ t.name }}</option>
+        }
+      </select>
+    </label>
+    <div class="full row end">
+      <button type="button" class="btn" (click)="sectionOpen.set(false)">Cancel</button>
+      <button type="submit" class="btn primary">Save</button>
+    </div>
+  </form>
+</app-modal>
