@@ -19,17 +19,21 @@ import {
   LearnerList,
   LearnerProfile,
   LogPage,
+  PrePostInput,
+  PrePostOverview,
+  PrePostSheet,
   Report,
   Roster,
   ScheduleInput,
   SchoolSettings,
   SectionInfo,
   Subject,
+  SubjectOptions,
   User,
   UserInput,
 } from './models';
 
-type Query = Record<string, string | number | boolean | null | undefined>;
+export type Query = Record<string, string | number | boolean | null | undefined>;
 
 /** Build HttpParams, dropping empty values. */
 function params(q: Query = {}): HttpParams {
@@ -65,15 +69,20 @@ export class ApiService {
   attendanceOverview(q: Query) {
     return this.http.get<AttendanceOverview>('/api/attendance/overview', { params: params(q) });
   }
-  /** Class periods on a date that the signed-in user may record. */
-  periods(date: string, sectionId?: number | null) {
-    return this.http.get<{ date: string; day: string; periods: ClassPeriod[] }>('/api/attendance/periods', { params: params({ date, sectionId }) });
+  /** Class periods on a date that the signed-in user may record (optionally one subject's). */
+  periods(date: string, subjectId?: number | null) {
+    return this.http.get<{ date: string; day: string; periods: ClassPeriod[] }>('/api/attendance/periods', { params: params({ date, subjectId }) });
   }
   roster(scheduleId: number, date: string) {
     return this.http.get<Roster>('/api/attendance/roster', { params: params({ scheduleId, date }) });
   }
-  saveAttendance(scheduleId: number, date: string, entries: { learnerId: number; status: AttendanceStatus; timeIn?: string; remarks?: string }[]) {
-    return this.http.post<{ saved: number; late: number; absent: number }>('/api/attendance/bulk', { scheduleId, date, entries });
+  saveAttendance(
+    scheduleId: number,
+    date: string,
+    entries: { learnerId: number; status: AttendanceStatus; timeIn?: string; remarks?: string }[],
+    session: { competencyId: number | null; topic: string },
+  ) {
+    return this.http.post<{ saved: number; late: number; absent: number }>('/api/attendance/bulk', { scheduleId, date, entries, ...session });
   }
 
   // ---- Competencies ----
@@ -103,6 +112,18 @@ export class ApiService {
   deleteAssessment(id: number) {
     return this.http.delete(`/api/assessments/${id}`);
   }
+  prePost(q: Query) {
+    return this.http.get<PrePostOverview>('/api/assessments/prepost', { params: params(q) });
+  }
+  prePostSheet(sectionId: number, competencyId: number) {
+    return this.http.get<PrePostSheet>('/api/assessments/prepost/sheet', { params: params({ sectionId, competencyId }) });
+  }
+  savePrePost(body: PrePostInput) {
+    return this.http.put<{ id: number; pre: number; post: number }>('/api/assessments/prepost', body);
+  }
+  deletePrePost(id: number) {
+    return this.http.delete(`/api/assessments/prepost/${id}`);
+  }
 
   // ---- Alerts ----
   alerts(q: Query) {
@@ -127,7 +148,7 @@ export class ApiService {
   learners(q: Query) {
     return this.http.get<LearnerList>('/api/learners', { params: params(q) });
   }
-  learner(id: number) {
+  learner(id: number | string) {
     return this.http.get<LearnerProfile>(`/api/learners/${id}`);
   }
   saveLearner(body: LearnerInput, id?: number) {
@@ -144,11 +165,16 @@ export class ApiService {
   saveSettings(body: SchoolSettings) {
     return this.http.put<SchoolSettings>('/api/settings', body);
   }
-  sections() {
-    return this.http.get<SectionInfo[]>('/api/sections');
+  /** Sections in view; with a subject, the sections where the user handles it. */
+  sections(subjectId?: number | null) {
+    return this.http.get<SectionInfo[]>('/api/sections', { params: params({ subjectId }) });
   }
   subjects() {
     return this.http.get<Subject[]>('/api/subjects');
+  }
+  /** Options for the shared subject filter. */
+  mySubjects() {
+    return this.http.get<SubjectOptions>('/api/subjects/mine');
   }
   saveSubject(body: Partial<Subject>, id?: number) {
     return id ? this.http.put<Subject>(`/api/subjects/${id}`, body) : this.http.post<Subject>('/api/subjects', body);

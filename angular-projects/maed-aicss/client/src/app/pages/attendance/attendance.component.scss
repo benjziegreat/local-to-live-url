@@ -117,3 +117,31 @@
   margin-top: 14px;
   span { margin-right: auto; }
 }
+
+.scope-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--info-soft);
+  color: var(--text-2);
+  font-size: 0.88rem;
+}
+
+.pad { padding: 0 16px; margin: 10px 0 0; }
+.sm-search { min-height: 34px; width: 200px; }
+.table-wrap.tall { max-height: 560px; overflow-y: auto; }
+
+.session-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  gap: 12px;
+  margin: 4px 0 12px;
+  padding: 12px;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  .full { grid-column: 1 / -1; margin: 0; }
+  @media (max-width: 640px) { grid-template-columns: minmax(0, 1fr); }
+}

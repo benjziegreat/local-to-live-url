@@ -33,7 +33,9 @@
   align-items: center;
   gap: 8px;
   .progress { flex: 1; min-width: 60px; }
-  span:last-child { font-weight: 700; width: 40px; text-align: right; }
+  flex-wrap: wrap;
+  .m-pct { font-weight: 700; width: 40px; text-align: right; }
+  .gaps { flex-basis: 100%; }
 }
 .crit { color: var(--critical); }
 .actions { white-space: nowrap; text-align: right; .btn + .btn { margin-left: 4px; } }
@@ -41,3 +43,29 @@ tr.inactive td { opacity: 0.6; }
 .lead { margin: 0 0 12px; }
 .sub { font-size: 0.95rem; margin: 16px 0 8px; }
 .mini { margin: 0; padding-left: 18px; color: var(--text-2); font-size: 0.85rem; display: grid; gap: 4px; }
+
+.group-row th {
+  background: var(--surface-2);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--brand);
+}
+.period-row td {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-2);
+  padding-top: 10px;
+  padding-bottom: 4px;
+  border-bottom: 1px dashed var(--line);
+}
+.up { color: var(--success); font-weight: 700; }
+.down { color: var(--critical); font-weight: 700; }
+.legend-note { padding: 10px 16px 14px; margin: 0; }
+.detail-foot { margin-top: 6px; }
+@media (max-width: 700px) {
+  .group-row, .period-row { display: block; }
+  .group-row th, .period-row td { display: block; }
+}
+
+.sub-val { font-size: 1rem; color: var(--text-2); font-weight: 700; }

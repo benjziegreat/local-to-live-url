@@ -3,16 +3,18 @@ import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../../core/api.service';
 import { errorMessage } from '../../core/auth.interceptor';
-import { ALERT_STATUS_LABEL, ALERT_STATUS_TONE, LEVEL_ICON, LEVEL_LABEL, LEVEL_TONE, fmtDate, fmtDateTime } from '../../core/format';
-import { AlertItem, AlertLevel, AlertStatus, AlertsResponse } from '../../core/models';
+import { ALERT_STATUS_LABEL, ALERT_STATUS_TONE, INTERVENTION_LABEL, INTERVENTION_TONE, LEVEL_ICON, LEVEL_LABEL, LEVEL_TONE, fmtDate, fmtDateTime } from '../../core/format';
+import { AlertItem, AlertLevel, AlertStatus, AlertsResponse, Intervention } from '../../core/models';
 import { NavStateService } from '../../core/nav-state.service';
+import { SubjectFilterService, onSubjectChange } from '../../core/subject-filter.service';
 import { ToastService } from '../../core/toast.service';
 import { IconComponent } from '../../shared/icon.component';
 import { ModalComponent } from '../../shared/modal.component';
+import { SubjectFilterComponent } from '../../shared/subject-filter.component';
 
 @Component({
   selector: 'app-alerts',
-  imports: [FormsModule, RouterLink, IconComponent, ModalComponent],
+  imports: [FormsModule, RouterLink, IconComponent, ModalComponent, SubjectFilterComponent],
   templateUrl: './alerts.component.html',
   styleUrl: './alerts.component.scss',
 })
@@ -20,15 +22,20 @@ export class AlertsComponent {
   private api = inject(ApiService);
   private toast = inject(ToastService);
   private navState = inject(NavStateService);
+  protected readonly subject = inject(SubjectFilterService);
 
   protected readonly data = signal<AlertsResponse | null>(null);
   protected readonly error = signal<string | null>(null);
   protected readonly refreshing = signal(false);
   protected level: AlertLevel | '' = '';
   protected status: AlertStatus | '' = '';
+  protected intervention: Intervention | '' = '';
   protected sectionId: number | null = null;
 
   protected readonly LEVELS: AlertLevel[] = ['HIGH', 'MEDIUM', 'LOW'];
+  protected readonly INTERVENTIONS: Intervention[] = ['REMEDIATION', 'RETEACHING', 'CATCH_UP', 'ENRICHMENT', 'ATTENDANCE'];
+  protected readonly INTERVENTION_LABEL = INTERVENTION_LABEL;
+  protected readonly INTERVENTION_TONE = INTERVENTION_TONE;
   protected readonly LEVEL_LABEL = LEVEL_LABEL;
   protected readonly LEVEL_TONE = LEVEL_TONE;
   protected readonly LEVEL_ICON = LEVEL_ICON;
@@ -47,19 +54,23 @@ export class AlertsComponent {
     const d = this.data();
     if (!d) return '';
     const c = d.counts;
-    if (c.HIGH) return `${c.HIGH} learner(s) with frequent absences may be at risk of falling behind. Follow up with their parents or guardians first.`;
-    if (c.MEDIUM) return `${c.MEDIUM} learner(s) or competencies are below target. Plan reteaching and supplementary activities.`;
-    if (c.LOW) return `${c.LOW} competency(ies) could use a short whole-class review.`;
-    return 'No open alerts. Learners are on track.';
+    const where = this.subject.selected() ? ` in ${this.subject.label()}` : '';
+    if (c.HIGH) return `${c.HIGH} learner(s) with frequent absences may be at risk of falling behind${where}. Follow up with their parents or guardians first.`;
+    if (c.MEDIUM) return `${c.MEDIUM} learner(s) are below target, missed lessons or showed limited improvement${where}. Plan remediation and catch-up activities.`;
+    if (c.LOW) return `${c.LOW} low-priority alert(s)${where}: low pre-tests, enrichment candidates or competencies to review with the class.`;
+    return `No open alerts${where}. Learners are on track.`;
   });
 
   constructor() {
-    this.load();
+    onSubjectChange((first) => {
+      if (!first) this.sectionId = null;
+      this.load();
+    });
   }
 
   protected load() {
     this.error.set(null);
-    this.api.alerts({ level: this.level, status: this.status, sectionId: this.sectionId }).subscribe({
+    this.api.alerts({ level: this.level, status: this.status, intervention: this.intervention, sectionId: this.sectionId, ...this.subject.query() }).subscribe({
       next: (d) => this.data.set(d),
       error: (err) => this.error.set(errorMessage(err)),
     });

@@ -3,9 +3,16 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 import { ApiService } from '../../core/api.service';
 import { errorMessage } from '../../core/auth.interceptor';
-import { downloadCsv, fmtDateTime, lastSchoolDay, monthLabel, thisMonth, todayIso } from '../../core/format';
+import { downloadCsv, fmtDateTime, lastSchoolDay, monthLabel, thisMonth, todayIso, TERMS } from '../../core/format';
 import { Report, SectionInfo } from '../../core/models';
+import { SubjectFilterService, onSubjectChange } from '../../core/subject-filter.service';
+import { downloadXlsx } from '../../core/xlsx';
 import { IconComponent } from '../../shared/icon.component';
+import { TermPipe } from '../../shared/term.pipe';
+import { SubjectFilterComponent } from '../../shared/subject-filter.component';
+
+type Need = 'section' | 'month' | 'quarter' | 'status' | 'year' | 'date' | 'range';
+type Range = 'day' | 'week' | 'month' | 'year';
 
 interface ReportDef {
   type: string;
@@ -13,30 +20,40 @@ interface ReportDef {
   sub: string;
   icon: string;
   tone: string;
-  needs: ('section' | 'month' | 'quarter' | 'status' | 'year' | 'date')[];
+  group: string;
+  needs: Need[];
+  /** Needs exactly one section (no "All sections") */
+  oneSection?: boolean;
 }
 
 const REPORTS: ReportDef[] = [
-  { type: 'dtr', title: 'Daily Time Record', sub: 'Time in per class period, room & schedule', icon: 'clock', tone: 'blue', needs: ['section', 'date'] },
-  { type: 'sf2', title: 'SF2 Daily Attendance', sub: 'School Form 2 inspired, per section', icon: 'calendar-check', tone: 'blue', needs: ['section', 'month'] },
-  { type: 'attendance', title: 'Attendance Report', sub: 'Weekly / monthly summary', icon: 'calendar', tone: 'blue', needs: ['section', 'month', 'year'] },
-  { type: 'competency', title: 'Competency Report', sub: 'Progress & mastery', icon: 'target', tone: 'purple', needs: ['section', 'quarter'] },
-  { type: 'assessment', title: 'Assessment Report', sub: 'Performance analysis', icon: 'clipboard', tone: 'purple', needs: ['section', 'quarter'] },
-  { type: 'performance', title: 'Learner Performance', sub: 'Analytics & recommended actions', icon: 'trend', tone: 'green', needs: ['section'] },
-  { type: 'alerts', title: 'Instructional Alerts', sub: 'Summary of interventions', icon: 'bell', tone: 'orange', needs: ['section', 'status'] },
-  { type: 'consolidated', title: 'Consolidated Report', sub: 'Attendance + performance', icon: 'file', tone: 'green', needs: ['section'] },
+  { group: 'Attendance', type: 'attendance', title: 'Attendance Report', sub: 'Daily, weekly, monthly or school year, per learner', icon: 'calendar', tone: 'blue', needs: ['section', 'range'] },
+  { group: 'Attendance', type: 'subjects', title: 'Subject Attendance Summary', sub: 'Rate per subject (or per section for one subject)', icon: 'book', tone: 'blue', needs: ['section', 'range'] },
+  { group: 'Attendance', type: 'sf2', title: 'SF2 Daily Attendance', sub: 'School Form 2 grid, per section and month', icon: 'calendar-check', tone: 'blue', needs: ['section', 'month'], oneSection: true },
+  { group: 'Attendance', type: 'dtr', title: 'Daily Time Record', sub: 'Time in per class period, with competency taught', icon: 'clock', tone: 'blue', needs: ['section', 'date'], oneSection: true },
+  { group: 'Competencies', type: 'completion', title: 'Competency Completion', sub: 'Lessons, pre/post-tests and sections completed', icon: 'check-circle', tone: 'purple', needs: ['section', 'quarter'] },
+  { group: 'Competencies', type: 'competency', title: 'Competency Mastery', sub: 'Mastered, in progress, needing support', icon: 'target', tone: 'purple', needs: ['section', 'quarter'] },
+  { group: 'Assessments', type: 'prepost', title: 'Pre-test vs Post-test', sub: 'Per learner and competency, with interpretation', icon: 'trend', tone: 'green', needs: ['section', 'quarter'] },
+  { group: 'Assessments', type: 'gain', title: 'Learning Gain Analysis', sub: 'Class-level gain per competency', icon: 'chart', tone: 'green', needs: ['section', 'quarter'] },
+  { group: 'Assessments', type: 'assessment', title: 'Assessment Report', sub: 'Quizzes, tasks and exams', icon: 'clipboard', tone: 'green', needs: ['section', 'quarter'] },
+  { group: 'Learners', type: 'performance', title: 'Learner Performance', sub: 'Attendance, scores and recommended actions', icon: 'users', tone: 'orange', needs: ['section'] },
+  { group: 'Learners', type: 'support', title: 'Learners Needing Support', sub: 'Issues and recommended interventions', icon: 'alert', tone: 'orange', needs: ['section'] },
+  { group: 'Learners', type: 'alerts', title: 'Instructional Alerts', sub: 'Summary of alerts and follow-ups', icon: 'bell', tone: 'orange', needs: ['section', 'status'] },
+  { group: 'Learners', type: 'consolidated', title: 'Consolidated Report', sub: 'Attendance + performance', icon: 'file', tone: 'orange', needs: ['section'] },
 ];
 
 @Component({
   selector: 'app-reports',
-  imports: [FormsModule, IconComponent],
+  imports: [FormsModule, IconComponent, SubjectFilterComponent, TermPipe],
   templateUrl: './reports.component.html',
   styleUrl: './reports.component.scss',
 })
 export class ReportsComponent {
+  protected readonly TERMS = TERMS;
   private api = inject(ApiService);
+  protected readonly subject = inject(SubjectFilterService);
 
-  protected readonly reports = REPORTS;
+  protected readonly groups = [...new Set(REPORTS.map((r) => r.group))].map((group) => ({ group, list: REPORTS.filter((r) => r.group === group) }));
   protected readonly selected = signal<ReportDef | null>(null);
   protected readonly report = signal<Report | null>(null);
   protected readonly loading = signal(false);
@@ -46,6 +63,7 @@ export class ReportsComponent {
 
   protected sectionId: number | null = null;
   protected month = thisMonth();
+  protected range: Range = 'month';
   protected quarter: number | null = null;
   protected alertStatus = '';
   protected date = lastSchoolDay();
@@ -63,23 +81,36 @@ export class ReportsComponent {
   });
   protected readonly monthLabel = monthLabel;
 
+  private readonly initialType = inject(ActivatedRoute).snapshot.queryParamMap.get('type');
+
   constructor() {
-    this.api.sections().subscribe({ next: (s) => this.sections.set(s), error: () => {} });
-    const type = inject(ActivatedRoute).snapshot.queryParamMap.get('type');
-    const def = REPORTS.find((r) => r.type === type);
-    if (def) this.choose(def);
+    // Sections follow the subject filter (a subject teacher sees the sections they teach it in).
+    onSubjectChange((first) => {
+      this.api.sections(this.subject.selectedId()).subscribe({
+        next: (s) => {
+          this.sections.set(s);
+          if (this.sectionId && !s.some((x) => x.id === this.sectionId)) this.sectionId = null;
+          if (first) {
+            const def = REPORTS.find((r) => r.type === this.initialType);
+            if (def) this.choose(def);
+          } else if (this.selected()) {
+            this.choose(this.selected()!);
+          }
+        },
+        error: () => {},
+      });
+    });
   }
 
   protected choose(def: ReportDef) {
     this.selected.set(def);
     this.report.set(null);
     this.error.set(null);
-    if ((def.type === 'sf2' || def.type === 'dtr') && !this.sectionId && this.sections().length) this.sectionId = this.sections()[0].id;
-    if (def.type !== 'attendance' && this.month === 'year') this.month = thisMonth();
+    if (def.oneSection && !this.sectionId && this.sections().length) this.sectionId = this.sections()[0].id;
     this.generate();
   }
 
-  protected has(need: ReportDef['needs'][number]) {
+  protected has(need: Need) {
     return this.selected()?.needs.includes(need) ?? false;
   }
 
@@ -88,13 +119,16 @@ export class ReportsComponent {
     if (!def) return;
     this.loading.set(true);
     this.error.set(null);
+    const ranged = this.has('range');
     this.api
       .report(def.type, {
+        ...this.subject.query(),
         sectionId: this.has('section') ? this.sectionId : null,
-        month: this.has('month') ? this.month : null,
+        range: ranged ? this.range : null,
+        month: this.has('month') || (ranged && this.range === 'month') ? this.month : null,
+        date: this.has('date') || (ranged && (this.range === 'day' || this.range === 'week')) ? this.date : null,
         quarter: this.has('quarter') ? this.quarter : null,
         status: this.has('status') ? this.alertStatus : null,
-        date: this.has('date') ? this.date : null,
       })
       .subscribe({
         next: (r) => {
@@ -108,11 +142,30 @@ export class ReportsComponent {
       });
   }
 
+  private exportColumns(r: Report) {
+    return r.columns.map((c) => ({ key: c.key, label: c.sub ? `${c.label} ${c.sub}` : c.label }));
+  }
+
+  private fileName(r: Report, ext: string) {
+    return `${r.type}-report-${this.subject.selected()?.code ?? 'all-subjects'}-${new Date().toISOString().slice(0, 10)}.${ext}`;
+  }
+
+  protected excel() {
+    const r = this.report();
+    if (!r) return;
+    downloadXlsx(this.fileName(r, 'xlsx'), {
+      name: r.title.split('—')[0].trim(),
+      title: [r.title, `${r.school} · ${r.subtitle}`, ...(r.legend ? [r.legend] : []), `Generated ${fmtDateTime(r.generatedAt)}`],
+      columns: this.exportColumns(r),
+      rows: r.rows,
+      summary: r.summary,
+    });
+  }
+
   protected csv() {
     const r = this.report();
     if (!r) return;
-    const cols = r.columns.map((c) => ({ key: c.key, label: c.sub ? `${c.label} ${c.sub}` : c.label }));
-    downloadCsv(`${r.type}-report-${new Date().toISOString().slice(0, 10)}.csv`, cols, r.rows);
+    downloadCsv(this.fileName(r, 'csv'), this.exportColumns(r), r.rows);
   }
 
   /** DTR cells look like "07:52 L" when the learner was late. */
@@ -120,6 +173,7 @@ export class ReportsComponent {
     return typeof v === 'string' && v.endsWith(' L');
   }
 
+  /** Print dialog; choose "Save as PDF" to export a PDF. */
   protected print() {
     window.print();
   }

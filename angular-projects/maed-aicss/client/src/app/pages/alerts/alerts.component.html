@@ -2,6 +2,7 @@
   <header class="page-head">
     <h1><app-icon name="bell" [size]="28" /> Instructional Alerts</h1>
     <div class="tools">
+      <app-subject-filter />
       @if (data(); as d) {
         @if (d.sections.length > 1) {
           <select class="input" [(ngModel)]="sectionId" (ngModelChange)="load()" aria-label="Section">
@@ -16,6 +17,12 @@
         <option value="">All levels</option>
         @for (l of LEVELS; track l) {
           <option [value]="l">{{ LEVEL_LABEL[l] }}</option>
+        }
+      </select>
+      <select class="input" [(ngModel)]="intervention" (ngModelChange)="load()" aria-label="Intervention">
+        <option value="">All interventions</option>
+        @for (i of INTERVENTIONS; track i) {
+          <option [value]="i">{{ INTERVENTION_LABEL[i] }}</option>
         }
       </select>
       <select class="input" [(ngModel)]="status" (ngModelChange)="load()" aria-label="Status">
@@ -48,6 +55,15 @@
       <aside class="card insight">
         <h3><app-icon name="bulb" [size]="22" /> Alert Insights</h3>
         <p>{{ insight() }}</p>
+        <p class="chips">
+          @for (i of INTERVENTIONS; track i) {
+            @if (d.byIntervention[i]) {
+              <button type="button" class="badge" [class]="INTERVENTION_TONE[i]" [class.sel]="intervention === i" (click)="intervention = intervention === i ? '' : i; load()">
+                {{ INTERVENTION_LABEL[i] }} {{ d.byIntervention[i] }}
+              </button>
+            }
+          }
+        </p>
         <p class="muted small">{{ d.byStatus.FOLLOWED_UP }} followed up · {{ d.byStatus.RESOLVED }} resolved</p>
       </aside>
     </section>
@@ -63,8 +79,9 @@
             <tr>
               <th>Learner</th>
               <th>Alert Level</th>
-              <th>Issue</th>
-              <th>Recommended Action</th>
+              <th>Subject &amp; Competency</th>
+              <th>Reason</th>
+              <th>Recommended Intervention</th>
               <th>Status</th>
               <th>Date</th>
               <th></th>
@@ -81,8 +98,21 @@
                   }
                 </td>
                 <td data-label="Level"><span class="badge" [class]="LEVEL_TONE[a.level]"><app-icon [name]="LEVEL_ICON[a.level]" [size]="13" /> {{ LEVEL_LABEL[a.level] }}</span></td>
-                <td data-label="Issue" class="issue"><strong>{{ a.title }}</strong><br /><span class="muted small">{{ a.detail }}</span></td>
-                <td data-label="Action" class="action">{{ a.action }}</td>
+                <td data-label="Subject" class="subj">
+                  <strong>{{ a.subject ?? 'All subjects' }}</strong>
+                  @if (a.competencyCode) {
+                    <br /><span class="muted small" [title]="a.competencyTitle ?? ''">{{ a.competencyCode }}</span>
+                  } @else if (!a.subject) {
+                    <br /><span class="muted small">Whole-day attendance</span>
+                  }
+                </td>
+                <td data-label="Reason" class="issue"><strong>{{ a.title }}</strong><br /><span class="muted small">{{ a.detail }}</span></td>
+                <td data-label="Intervention" class="action">
+                  @if (a.intervention) {
+                    <span class="badge" [class]="INTERVENTION_TONE[a.intervention]">{{ INTERVENTION_LABEL[a.intervention] }}</span><br />
+                  }
+                  {{ a.action }}
+                </td>
                 <td data-label="Status">
                   <span class="badge" [class]="STATUS_TONE[a.status]">{{ STATUS_LABEL[a.status] }}</span>
                   @if (a.followUpNote) {
@@ -93,7 +123,7 @@
                 <td class="right"><button type="button" class="btn sm" (click)="openFollowUp(a)"><app-icon name="edit" [size]="15" /> Follow up</button></td>
               </tr>
             } @empty {
-              <tr><td colspan="7" class="empty">No alerts for these filters.</td></tr>
+              <tr><td colspan="8" class="empty">No alerts for these filters.</td></tr>
             }
           </tbody>
         </table>
@@ -110,6 +140,7 @@
       <span class="badge" [class]="LEVEL_TONE[a.level]">{{ LEVEL_LABEL[a.level] }}</span>
       <strong>{{ a.title }}</strong>
     </div>
+    <p class="muted small">{{ a.learner ?? 'Whole class' }} · {{ a.section }} · {{ a.subject ?? 'All subjects' }}{{ a.competencyCode ? ' · ' + a.competencyCode : '' }}</p>
     <p class="muted">{{ a.detail }}</p>
     <p class="rec"><app-icon name="bulb" [size]="16" /> {{ a.action }}</p>
     @if (a.followUpNote) {

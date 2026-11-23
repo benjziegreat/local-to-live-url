@@ -1,4 +1,4 @@
-import { AlertLevel, AlertStatus, AreaStatus, AssessmentType, AttendanceStatus, Band, Monitoring } from './models';
+import { AlertLevel, AlertStatus, AreaStatus, AssessmentType, AttendanceStatus, Band, Change, Completion, Intervention, Monitoring } from './models';
 
 export type Tone = 'success' | 'warning' | 'critical' | 'info' | 'muted' | 'purple';
 
@@ -22,7 +22,41 @@ export const LEVEL_ICON: Record<AlertLevel, string> = { HIGH: 'alert-octagon', M
 export const ALERT_STATUS_LABEL: Record<AlertStatus, string> = { OPEN: 'Open', FOLLOWED_UP: 'Followed up', RESOLVED: 'Resolved' };
 export const ALERT_STATUS_TONE: Record<AlertStatus, Tone> = { OPEN: 'critical', FOLLOWED_UP: 'warning', RESOLVED: 'success' };
 
-export const TYPE_LABEL: Record<AssessmentType, string> = { QUIZ: 'Quiz', PERFORMANCE_TASK: 'Performance Task', QUARTERLY_EXAM: 'Quarterly Exam' };
+export const TYPE_LABEL: Record<AssessmentType, string> = { QUIZ: 'Quiz', PERFORMANCE_TASK: 'Performance Task', QUARTERLY_EXAM: 'Term Exam' };
+
+/**
+ * The school year has three terms. (Stored as `quarter` / `currentQuarter` in the database
+ * so existing records keep their values.)
+ */
+export const TERMS = [1, 2, 3] as const;
+const ORDINAL: Record<number, string> = { 1: '1st', 2: '2nd', 3: '3rd' };
+
+/** 1 -> "1st Term" */
+export function termLabel(n: number | null | undefined): string {
+  return n === null || n === undefined ? '-' : `${ORDINAL[n] ?? `${n}th`} Term`;
+}
+
+export const INTERVENTION_LABEL: Record<Intervention, string> = {
+  RETEACHING: 'Reteaching',
+  REMEDIATION: 'Remediation',
+  ENRICHMENT: 'Enrichment',
+  CATCH_UP: 'Catch-up',
+  ATTENDANCE: 'Attendance follow-up',
+};
+export const INTERVENTION_TONE: Record<Intervention, Tone> = { RETEACHING: 'purple', REMEDIATION: 'warning', ENRICHMENT: 'success', CATCH_UP: 'info', ATTENDANCE: 'critical' };
+
+export const COMPLETION_LABEL: Record<Completion, string> = { COMPLETED: 'Completed', IN_PROGRESS: 'In progress', NOT_STARTED: 'Not started' };
+export const COMPLETION_TONE: Record<Completion, Tone> = { COMPLETED: 'success', IN_PROGRESS: 'info', NOT_STARTED: 'muted' };
+
+export const CHANGE_LABEL: Record<Change, string> = { IMPROVED: 'Improved', MAINTAINED: 'Maintained', DECLINED: 'Declined', PENDING: 'Awaiting post-test', NO_PRETEST: 'No pre-test' };
+export const CHANGE_TONE: Record<Change, Tone> = { IMPROVED: 'success', MAINTAINED: 'warning', DECLINED: 'critical', PENDING: 'muted', NO_PRETEST: 'muted' };
+
+/** "+12.5", "-3", "0" (or "-" when null). */
+export function signed(v: number | null | undefined, digits = 1): string {
+  if (v === null || v === undefined) return '-';
+  const s = v.toFixed(digits).replace(/\.0+$/, '');
+  return v > 0 ? `+${s}` : s;
+}
 
 /** Colours used for learning areas / chart segments (match the .c-N classes in styles.scss). */
 export const SERIES = ['#2f7cf0', '#34a853', '#8b5cf6', '#f59e0b', '#06b6d4', '#ec4899'];

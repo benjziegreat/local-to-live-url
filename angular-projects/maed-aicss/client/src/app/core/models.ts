@@ -7,6 +7,25 @@ export type AlertStatus = 'OPEN' | 'FOLLOWED_UP' | 'RESOLVED';
 export type AssessmentType = 'QUIZ' | 'PERFORMANCE_TASK' | 'QUARTERLY_EXAM';
 export type Band = 'MASTERED' | 'IN_PROGRESS' | 'NEEDS_SUPPORT';
 export type AreaStatus = 'ON_TRACK' | 'MONITOR' | 'NEEDS_SUPPORT' | 'NO_DATA';
+export type Intervention = 'RETEACHING' | 'REMEDIATION' | 'ENRICHMENT' | 'CATCH_UP' | 'ATTENDANCE';
+export type Completion = 'COMPLETED' | 'IN_PROGRESS' | 'NOT_STARTED';
+export type Change = 'IMPROVED' | 'MAINTAINED' | 'DECLINED' | 'PENDING' | 'NO_PRETEST';
+
+/** One option of the shared subject filter. */
+export interface SubjectOption {
+  id: number;
+  code: string;
+  name: string;
+  kind: SubjectKind;
+  /** The signed-in teacher teaches this subject (false = advisory-section subject) */
+  teaches: boolean;
+}
+
+export interface SubjectOptions {
+  /** Whether the "All subjects" overall view is available (admins and advisers) */
+  allowAll: boolean;
+  subjects: SubjectOption[];
+}
 
 export interface User {
   id: number;
@@ -141,8 +160,15 @@ export interface AlertItem {
   learnerId: number | null;
   learner: string | null;
   learnerNo: string | null;
+  sectionId: number | null;
   section: string | null;
+  subjectId: number | null;
+  subject: string | null;
+  intervention: Intervention | null;
+  competencyId: number | null;
   competency: string | null;
+  competencyCode: string | null;
+  competencyTitle: string | null;
   followUpNote: string | null;
   followUpBy: string | null;
   followUpAt: string | null;
@@ -151,7 +177,9 @@ export interface AlertItem {
 }
 
 export interface AreaProgress {
+  /** Learning area (all subjects) or competency code (one subject) */
   learningArea: string;
+  title?: string;
   competencies: number;
   assessed: number;
   mastered: number;
@@ -183,9 +211,13 @@ export interface Dashboard {
     atRisk: number;
     openAlerts: number;
   };
+  subjectId: number | null;
   trend: DayPoint[];
   monthly: MonthPoint[];
+  progressBy: 'area' | 'competency';
   competencyProgress: AreaProgress[];
+  assessment: ScoreDistribution & { masteryTarget: number };
+  prePost: { summary: PrePostSummary & { tests: number }; byCompetency: PrePostCompetency[] };
   alerts: AlertItem[];
   learners: LearnerRow[];
   system?: {
@@ -198,14 +230,63 @@ export interface Dashboard {
   };
 }
 
+export interface ScoreDistribution {
+  average: number | null;
+  scores: number;
+  passRate: number;
+  distribution: { excellent: number; satisfactory: number; needsImprovement: number };
+}
+
+export interface WeekPoint extends Counts {
+  /** Monday of the week */
+  week: string;
+  end: string;
+  days: number;
+}
+
+/** Attendance of one learner (for the selected subject when one is chosen). */
+export interface LearnerAttendance {
+  id: number;
+  learnerNo: string;
+  name: string;
+  section: string;
+  days: number;
+  present: number;
+  late: number;
+  absent: number;
+  excused: number;
+  periodsTotal: number;
+  periodsAttended: number;
+  rate: number | null;
+  recentAbsences: number;
+  belowTarget: boolean;
+  /** Lessons (class meetings with a competency) missed through absence */
+  missedLessons: number;
+  missedCompetencies: { code: string; missed: number }[];
+}
+
 export interface AttendanceOverview {
+  subjectId: number | null;
+  attendanceTarget: number;
   sections: SectionRef[];
-  kpis: { learners: number; rate: number | null; latestDate: string | null; absent: number; late: number; partial: number; present: number };
+  kpis: { learners: number; belowTarget: number; rate: number | null; latestDate: string | null; absent: number; late: number; partial: number; present: number };
   trend: DayPoint[];
   summary: Counts;
   schoolYear: Counts;
+  weekly: WeekPoint[];
   monthly: MonthPoint[];
   records: DayPoint[];
+  learners: LearnerAttendance[];
+}
+
+export interface CompetencyOption {
+  id: number;
+  code: string;
+  title: string;
+  quarter: number;
+  learningPeriod: string | null;
+  learningArea?: string;
+  subjectId?: number | null;
 }
 
 /** One class period (a ClassSchedule row) as offered for attendance recording. */
@@ -224,6 +305,8 @@ export interface ClassPeriod {
   recorded?: number;
   learners?: number;
   mine?: boolean;
+  /** Competency code logged for this meeting */
+  competency?: string | null;
 }
 
 export interface RosterEntry {
@@ -245,19 +328,28 @@ export interface Roster {
   date: string;
   graceMinutes: number;
   recorded: boolean;
+  currentQuarter: number;
+  /** Competencies of the period's subject */
+  competencies: CompetencyOption[];
+  /** Competency taught in this meeting (or the previous meeting's, as a suggestion) */
+  session: { competencyId: number | null; topic: string; saved: boolean };
   learners: RosterEntry[];
 }
 
 export interface Competency {
   id: number;
   code: string;
+  subjectId: number | null;
   learningArea: string;
   title: string;
   quarter: number;
+  learningPeriod: string | null;
   active: boolean;
 }
 
 export interface CompetencyWithStats extends Competency {
+  subject: string;
+  subjectCode: string | null;
   assessments: number;
   assessed: number;
   mastered: number;
@@ -265,20 +357,154 @@ export interface CompetencyWithStats extends Competency {
   needsSupport: number;
   masteryRate: number | null;
   average: number | null;
+  completion: Completion;
+  /** Sections in view that take the subject / that completed the post-test */
+  sections: number;
+  completedSections: number;
+  lessons: number;
+  lastLesson: string | null;
+  prePost: { tests: number; avgPre: number | null; avgPost: number | null; avgGain: number | null; completed: number };
 }
 
 export interface CompetencyOverview {
   sections: SectionRef[];
   masteryTarget: number;
-  kpis: { onTrack: number; monitor: number; needsSupport: number; targetCoverage: number };
+  currentQuarter: number;
+  kpis: {
+    onTrack: number;
+    monitor: number;
+    needsSupport: number;
+    targetCoverage: number;
+    coverage: number;
+    completed: number;
+    inProgressCount: number;
+    notStarted: number;
+    total: number;
+  };
   areas: AreaProgress[];
   competencies: CompetencyWithStats[];
 }
 
 export interface CompetencyDetail {
-  competency: Competency;
+  competency: Competency & { subject: string };
   assessments: { id: number; title: string; type: AssessmentType; date: string; section: string; maxScore: number }[];
-  learners: { id: number; learnerNo: string; name: string; section: string; average: number; band: Band }[];
+  prePost: PrePostTestRow[];
+  lessons: { section: string; lessons: number; last: string | null }[];
+  learners: {
+    id: number;
+    learnerNo: string;
+    name: string;
+    section: string;
+    average: number | null;
+    band: Band | null;
+    prePct: number | null;
+    postPct: number | null;
+    gain: number | null;
+  }[];
+}
+
+// ---- Competency-level pre-test / post-test ----
+
+export interface PrePostRecord {
+  testId: number;
+  learnerId: number;
+  learnerNo: string | null;
+  learner: string;
+  sectionId: number;
+  section: string;
+  subjectId: number | null;
+  subject: string;
+  quarter: number;
+  competencyId: number;
+  competencyCode: string;
+  competencyTitle: string;
+  preScore: number | null;
+  preTotal: number;
+  postScore: number | null;
+  postTotal: number;
+  prePct: number | null;
+  postPct: number | null;
+  /** Post-test % minus pre-test % (percentage points) */
+  gain: number | null;
+  change: Change;
+  performance: string;
+  interpretation: string;
+  preDate: string | null;
+  postDate: string | null;
+}
+
+export interface PrePostSummary {
+  learners: number;
+  preTaken: number;
+  postTaken: number;
+  completed: number;
+  avgPre: number | null;
+  avgPost: number | null;
+  avgGain: number | null;
+  avgPreCompleted: number | null;
+  avgPostCompleted: number | null;
+  improved: number;
+  maintained: number;
+  declined: number;
+  pending: number;
+  masteredPost: number;
+  lowPre: number;
+  limitedGain: number;
+}
+
+/** Class-level summary of one test (section × competency). */
+export interface PrePostTestRow extends PrePostSummary {
+  id: number;
+  sectionId: number;
+  section: string;
+  subjectId: number | null;
+  subject: string;
+  competencyId: number;
+  competencyCode: string;
+  competencyTitle: string;
+  quarter: number;
+  preTotal: number;
+  postTotal: number;
+  preDate: string | null;
+  postDate: string | null;
+}
+
+export interface PrePostCompetency extends PrePostSummary {
+  competencyId: number;
+  code: string;
+  title: string;
+  subject: string;
+  quarter: number;
+}
+
+export interface PrePostOverview {
+  academicYear: string;
+  masteryTarget: number;
+  minLearningGain: number;
+  pretestLowThreshold: number;
+  sections: SectionRef[];
+  competencies: CompetencyOption[];
+  summary: PrePostSummary & { tests: number };
+  tests: PrePostTestRow[];
+  byCompetency: PrePostCompetency[];
+  records: PrePostRecord[];
+}
+
+export interface PrePostSheet {
+  test: { id: number; preTotal: number; postTotal: number; preDate: string | null; postDate: string | null } | null;
+  section: SectionRef;
+  competency: { id: number; code: string; title: string; quarter: number; subject: string };
+  learners: { id: number; learnerNo: string; name: string; sex: 'M' | 'F'; preScore: number | null; postScore: number | null }[];
+}
+
+export interface PrePostInput {
+  sectionId: number;
+  competencyId: number;
+  preTotal: number;
+  postTotal: number;
+  preDate: string | null;
+  postDate: string | null;
+  scores: { learnerId: number; preScore: number | null; postScore: number | null }[];
 }
 
 export interface AssessmentListItem {
@@ -292,6 +518,7 @@ export interface AssessmentListItem {
   competency: string;
   competencyTitle: string;
   learningArea: string;
+  subjectId: number | null;
   sectionId: number;
   section: string;
   scored: number;
@@ -303,6 +530,7 @@ export interface AssessmentListItem {
 export interface AssessmentOverview {
   sections: SectionRef[];
   learningAreas: string[];
+  competencies: CompetencyOption[];
   masteryTarget: number;
   summary: { average: number | null; previousAverage: number | null; delta: number | null; assessments: number; scores: number; passRate: number };
   distribution: { excellent: number; satisfactory: number; needsImprovement: number };
@@ -337,6 +565,7 @@ export interface AlertsResponse {
   sections: SectionRef[];
   counts: Record<AlertLevel, number>;
   byStatus: Record<AlertStatus, number>;
+  byIntervention: Partial<Record<Intervention, number>>;
   items: AlertItem[];
 }
 
@@ -361,7 +590,35 @@ export interface Report {
 
 export interface LearnerList {
   sections: (SectionRef & { gradeLevel: number; strand: string; teacher: string | null })[];
-  learners: LearnerRow[];
+  /** subjectTeacher is set when a subject is selected */
+  learners: (LearnerRow & { subjectTeacher?: string | null })[];
+}
+
+/** A learner's standing in one subject. */
+export interface LearnerSubject {
+  id: number;
+  code: string;
+  name: string;
+  kind: SubjectKind;
+  teacher: string | null;
+  meetingsPerWeek: number;
+  attendanceRate: number | null;
+  present: number;
+  late: number;
+  absent: number;
+  excused: number;
+  periodsMissed: number;
+  recentAbsences: number;
+  assessmentAvg: number | null;
+  assessmentCount: number;
+  descriptor: string;
+  monitoring: Monitoring;
+  action: string;
+  competenciesAssessed: number;
+  competenciesMastered: number;
+  prePost: { tests: number; avgPre: number | null; avgPost: number | null; avgGain: number | null };
+  openAlerts: number;
+  monthly: MonthPoint[];
 }
 
 export interface LearnerProfile {
@@ -381,6 +638,7 @@ export interface LearnerProfile {
     recent: {
       date: string;
       status: AttendanceStatus;
+      subjectId: number;
       subject: string;
       startTime: string;
       endTime: string;
@@ -389,8 +647,22 @@ export interface LearnerProfile {
       remarks: string | null;
     }[];
   };
-  assessments: { id: number; title: string; type: AssessmentType; date: string; competency: string; learningArea: string; score: number; maxScore: number; percent: number }[];
-  competencies: { id: number; code: string; title: string; learningArea: string; quarter: number; average: number; band: Band }[];
+  assessments: {
+    id: number;
+    title: string;
+    type: AssessmentType;
+    date: string;
+    competency: string;
+    learningArea: string;
+    subjectId: number | null;
+    score: number;
+    maxScore: number;
+    percent: number;
+  }[];
+  competencies: { id: number; code: string; title: string; learningArea: string; subjectId: number | null; quarter: number; average: number; band: Band }[];
+  subjects: LearnerSubject[];
+  prePost: PrePostRecord[];
+  missedLessons: { competencyId: number; code: string; title: string; subjectId: number | null; missed: number; taught: number }[];
   alerts: AlertItem[];
 }
 
@@ -422,6 +694,8 @@ export interface SchoolSettings {
   reteachThreshold: number;
   lateGraceMinutes: number;
   missedClassThreshold: number;
+  pretestLowThreshold: number;
+  minLearningGain: number;
 }
 
 export interface UserInput {

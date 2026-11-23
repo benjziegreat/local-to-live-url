@@ -2,6 +2,7 @@
   <header class="page-head">
     <h1><app-icon name="users" [size]="28" /> Learners</h1>
     <div class="tools">
+      <app-subject-filter />
       <button type="button" class="btn" (click)="export()"><app-icon name="download" [size]="16" /> Export</button>
       @if (auth.isAdmin()) {
         <button type="button" class="btn primary" (click)="openForm()"><app-icon name="plus" [size]="16" /> Add Learner</button>
@@ -48,8 +49,8 @@
     @let d = data()!;
     <article class="panel">
       <header class="panel-head">
-        <h2><app-icon name="list" /> Student Directory</h2>
-        <span class="small">{{ d.learners.length }} learner(s)</span>
+        <h2><app-icon name="list" /> Student Directory{{ subject.selected() ? ' · ' + subject.label() : '' }}</h2>
+        <span class="small">{{ d.learners.length }} learner(s){{ subject.selected() ? ' enrolled' : '' }}</span>
       </header>
       <div class="table-wrap">
         <table class="table stacked">
@@ -58,8 +59,11 @@
               <th>Student ID</th>
               <th>Name</th>
               <th>Grade &amp; Section</th>
-              <th class="num">Attendance</th>
-              <th class="num">Assessment</th>
+              @if (subject.selected()) {
+                <th>Subject Teacher</th>
+              }
+              <th class="num">{{ subject.selected() ? 'Subject attendance' : 'Attendance' }}</th>
+              <th class="num">{{ subject.selected() ? 'Subject average' : 'Assessment' }}</th>
               <th>Status</th>
               <th></th>
             </tr>
@@ -72,6 +76,9 @@
                   <span class="who"><app-avatar [name]="l.name" [hue]="l.avatarHue" [size]="30" /> {{ l.name }}</span>
                 </td>
                 <td data-label="Section">{{ l.section }}</td>
+                @if (subject.selected()) {
+                  <td data-label="Subject teacher">{{ l.subjectTeacher ?? '-' }}</td>
+                }
                 <td data-label="Attendance" class="num">{{ pct(l.attendanceRate) }}</td>
                 <td data-label="Assessment" class="num">{{ pct(l.assessmentAvg) }}</td>
                 <td data-label="Status">
@@ -92,7 +99,7 @@
                 </td>
               </tr>
             } @empty {
-              <tr><td colspan="7" class="empty">No learners found.</td></tr>
+              <tr><td [attr.colspan]="subject.selected() ? 8 : 7" class="empty">No learners found.</td></tr>
             }
           </tbody>
         </table>
@@ -123,7 +130,7 @@
     <label class="field">
       <span>Grade &amp; section</span>
       <select class="input" name="sectionId" [(ngModel)]="form.sectionId" required>
-        @for (s of data()?.sections ?? []; track s.id) {
+        @for (s of formSections(); track s.id) {
           <option [ngValue]="s.id">{{ s.name }}</option>
         }
       </select>

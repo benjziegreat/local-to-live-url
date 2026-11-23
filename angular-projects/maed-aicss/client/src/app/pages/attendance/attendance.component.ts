@@ -5,14 +5,18 @@ import { ApiService } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
 import { errorMessage } from '../../core/auth.interceptor';
 import { ATT_LABEL, ATT_SHORT, ATT_TONE, downloadCsv, fmtDate, lastSchoolDay, monthLabel, pct, shortDate, todayIso, weekday } from '../../core/format';
-import { AttendanceOverview, AttendanceStatus, ClassPeriod, Roster } from '../../core/models';
+import { AttendanceOverview, AttendanceStatus, ClassPeriod, LearnerAttendance, Roster } from '../../core/models';
 import { NavStateService } from '../../core/nav-state.service';
+import { SubjectFilterService, onSubjectChange } from '../../core/subject-filter.service';
 import { ToastService } from '../../core/toast.service';
+import { downloadXlsx } from '../../core/xlsx';
 import { AvatarComponent } from '../../shared/avatar.component';
 import { IconComponent } from '../../shared/icon.component';
+import { TermPipe } from '../../shared/term.pipe';
 import { LinePoint, LineChartComponent } from '../../shared/line-chart.component';
 import { ModalComponent } from '../../shared/modal.component';
 import { RingChartComponent, RingSegment } from '../../shared/ring-chart.component';
+import { SubjectFilterComponent } from '../../shared/subject-filter.component';
 
 const STATUSES: AttendanceStatus[] = ['PRESENT', 'LATE', 'ABSENT', 'EXCUSED'];
 const toMin = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
@@ -25,7 +29,7 @@ export function to12h(hhmm: string): string {
 
 @Component({
   selector: 'app-attendance',
-  imports: [FormsModule, RouterLink, IconComponent, LineChartComponent, RingChartComponent, ModalComponent, AvatarComponent],
+  imports: [FormsModule, RouterLink, IconComponent, LineChartComponent, RingChartComponent, ModalComponent, AvatarComponent, SubjectFilterComponent, TermPipe],
   templateUrl: './attendance.component.html',
   styleUrl: './attendance.component.scss',
 })
@@ -34,11 +38,20 @@ export class AttendanceComponent {
   private toast = inject(ToastService);
   private navState = inject(NavStateService);
   protected readonly auth = inject(AuthService);
+  protected readonly subject = inject(SubjectFilterService);
 
   protected readonly data = signal<AttendanceOverview | null>(null);
   protected readonly error = signal<string | null>(null);
   protected range: 'week' | 'month' = 'week';
   protected sectionId: number | null = null;
+  protected readonly learnerQuery = signal('');
+  protected readonly onlyBelow = signal(false);
+  protected readonly learnerRows = computed(() => {
+    const q = this.learnerQuery().trim().toLowerCase();
+    return (this.data()?.learners ?? []).filter(
+      (l) => (!this.onlyBelow() || l.belowTarget || l.missedLessons) && (!q || l.name.toLowerCase().includes(q) || l.learnerNo.toLowerCase().includes(q)),
+    );
+  });
 
   protected readonly pct = pct;
   protected readonly fmtDate = fmtDate;
@@ -59,6 +72,9 @@ export class AttendanceComponent {
   protected readonly selected = signal<ClassPeriod | null>(null);
   protected readonly roster = signal<Roster | null>(null);
   protected readonly saving = signal(false);
+  /** Competency taught in the selected class meeting */
+  protected sessionCompetencyId: number | null = null;
+  protected sessionTopic = '';
 
   /** Periods grouped by section for the picker. */
   protected readonly periodGroups = computed(() => {
@@ -96,12 +112,15 @@ export class AttendanceComponent {
   });
 
   constructor() {
-    this.load();
+    onSubjectChange((first) => {
+      if (!first) this.sectionId = null;
+      this.load();
+    });
   }
 
   protected load() {
     this.error.set(null);
-    this.api.attendanceOverview({ range: this.range, sectionId: this.sectionId }).subscribe({
+    this.api.attendanceOverview({ range: this.range, sectionId: this.sectionId, ...this.subject.query() }).subscribe({
       next: (d) => this.data.set(d),
       error: (err) => this.error.set(errorMessage(err)),
     });
@@ -123,7 +142,7 @@ export class AttendanceComponent {
       this.selected.set(null);
       this.roster.set(null);
     }
-    this.api.periods(this.recDate).subscribe({
+    this.api.periods(this.recDate, this.subject.selectedId()).subscribe({
       next: (r) => {
         this.recDay.set(r.day);
         this.periods.set(r.periods);
@@ -138,7 +157,11 @@ export class AttendanceComponent {
     this.selected.set(p);
     this.roster.set(null);
     this.api.roster(p.id, this.recDate).subscribe({
-      next: (r) => this.roster.set(r),
+      next: (r) => {
+        this.sessionCompetencyId = r.session.competencyId;
+        this.sessionTopic = r.session.topic;
+        this.roster.set(r);
+      },
       error: (err) => this.toast.error(errorMessage(err)),
     });
   }
@@ -209,7 +232,7 @@ export class AttendanceComponent {
     const entries = r.learners.filter((l) => l.status).map((l) => ({ learnerId: l.id, status: l.status!, timeIn: l.timeIn || undefined, remarks: l.remarks }));
     if (this.tally()['NONE'] && !confirm(`${this.tally()['NONE']} learner(s) are not marked yet. Save the rest?`)) return;
     this.saving.set(true);
-    this.api.saveAttendance(r.period.id, r.date, entries).subscribe({
+    this.api.saveAttendance(r.period.id, r.date, entries, { competencyId: this.sessionCompetencyId, topic: this.sessionTopic }).subscribe({
       next: (res) => {
         this.saving.set(false);
         this.toast.success(`${r.period.subject} (${to12h(r.period.startTime)}, ${r.period.room}): ${res.saved} saved · ${res.late} late · ${res.absent} absent`);
@@ -242,5 +265,33 @@ export class AttendanceComponent {
       ],
       d.records.map((r) => ({ ...r, day: weekday(r.date), rate: pct(r.rate) })),
     );
+  }
+
+  protected missedText(l: LearnerAttendance) {
+    return l.missedCompetencies.map((c) => `${c.code} (${c.missed})`).join(', ');
+  }
+
+  /** Per-learner attendance for the subject in view, as an Excel workbook. */
+  protected exportLearners() {
+    const d = this.data();
+    if (!d) return;
+    downloadXlsx(`learner-attendance-${this.subject.selected()?.code ?? 'all'}-${todayIso()}.xlsx`, {
+      name: 'Learner attendance',
+      title: [`Learner Attendance — ${this.subject.label()}`, `School year to date · generated ${new Date().toLocaleString()}`],
+      columns: [
+        { key: 'learnerNo', label: 'Learner ID' },
+        { key: 'name', label: 'Learner' },
+        { key: 'section', label: 'Section' },
+        { key: 'days', label: 'Days' },
+        { key: 'present', label: 'Present' },
+        { key: 'late', label: 'Tardy' },
+        { key: 'absent', label: 'Absent' },
+        { key: 'excused', label: 'Excused' },
+        { key: 'rate', label: 'Attendance %' },
+        { key: 'missedLessons', label: 'Lessons missed' },
+        { key: 'missed', label: 'Competencies missed' },
+      ],
+      rows: d.learners.map((l) => ({ ...l, rate: pct(l.rate), missed: this.missedText(l) })),
+    });
   }
 }

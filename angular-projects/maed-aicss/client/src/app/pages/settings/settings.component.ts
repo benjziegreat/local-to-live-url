@@ -22,6 +22,8 @@ function to12h(hhmm: string): string {
 import { NavStateService } from '../../core/nav-state.service';
 import { ToastService } from '../../core/toast.service';
 import { IconComponent } from '../../shared/icon.component';
+import { TERMS } from '../../core/format';
+import { TermPipe } from '../../shared/term.pipe';
 import { ModalComponent } from '../../shared/modal.component';
 
 type Tab = 'school' | 'monitoring' | 'sections' | 'subjects' | 'rooms' | 'account';
@@ -41,11 +43,12 @@ const BELL: { start: string; end: string; label: string; kind: 'class' | 'break'
 
 @Component({
   selector: 'app-settings',
-  imports: [FormsModule, IconComponent, ModalComponent],
+  imports: [FormsModule, IconComponent, ModalComponent, TermPipe],
   templateUrl: './settings.component.html',
   styleUrl: './settings.component.scss',
 })
 export class SettingsComponent {
+  protected readonly TERMS = TERMS;
   private api = inject(ApiService);
   private toast = inject(ToastService);
   private navState = inject(NavStateService);

@@ -1,6 +1,8 @@
 // Report generation. Every report returns the same tabular shape so the client can
-// preview, print and export any of them:
+// preview, print (PDF) and export (Excel) any of them:
 //   { type, title, subtitle, columns: [{ key, label, align? }], rows: [{...}], summary: [{ label, value }] }
+//
+// Every report accepts `subjectId` (the shared subject filter) and `sectionId`.
 const express = require('express');
 const prisma = require('../lib/prisma');
 const { authenticate } = require('../lib/auth');
@@ -8,10 +10,13 @@ const { asyncHandler, HttpError } = require('../lib/http');
 const { getSettings } = require('../lib/settings');
 const { syncAlerts } = require('../lib/alerts');
 const { logActivity } = require('../lib/log');
-const { learnerWhere, sectionWhere, assertSection, optInt } = require('../lib/scope');
-const { learnerMetrics, competencyStats, attendanceRate, dayStatus, learnerDays, totals, dailySeries, round1, avg, STATUS_ORDER } = require('../lib/metrics');
-const { parseMonth, parseDay, dayKey, addDays, dateOnly, isoWeekdayUtc, schoolYearStart } = require('../lib/time');
-const { learnerName, learnerRow } = require('../lib/shape');
+const { learnerWhere, sectionWhere, assertSection, competencyWhere, optInt, loadSubject } = require('../lib/scope');
+const { learnerMetrics, competencyStats, attendanceRate, dayStatus, learnerDays, totals, dailySeries, weeklySeries, missedLessons, rateOf, round1, avg, STATUS_ORDER } = require('../lib/metrics');
+const { parseMonth, parseDay, dayKey, addDays, dateOnly, isoWeekdayUtc, schoolYearStart, weekStart } = require('../lib/time');
+const { learnerName, learnerRow, INTERVENTION_LABEL, termLabel } = require('../lib/shape');
+const { loadPrePost, summarize, testRows } = require('../lib/prepost');
+const { coverage, completion, COMPLETION_LABEL } = require('../lib/coverage');
+const { scopeWhere: alertScope } = require('./alerts');
 
 const router = express.Router();
 router.use(authenticate);
@@ -19,24 +24,59 @@ router.use(authenticate);
 const MONITORING = { ON_TRACK: 'On Track', MONITOR: 'Monitor', AT_RISK: 'At Risk' };
 const LEVEL = { HIGH: 'High', MEDIUM: 'Medium', LOW: 'Low' };
 const ALERT_STATUS = { OPEN: 'Open', FOLLOWED_UP: 'Followed up', RESOLVED: 'Resolved' };
-const TYPE = { QUIZ: 'Quiz', PERFORMANCE_TASK: 'Performance Task', QUARTERLY_EXAM: 'Quarterly Exam' };
+const TYPE = { QUIZ: 'Quiz', PERFORMANCE_TASK: 'Performance Task', QUARTERLY_EXAM: 'Term Exam' };
 const pct = (v) => (v === null || v === undefined ? '-' : `${v}%`);
+const signed = (v) => (v === null || v === undefined ? '-' : `${v > 0 ? '+' : ''}${v}`);
 const monthLabel = (d) => d.toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+const longDate = (d) => d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+const cols = (list) => list.map(([key, label, align]) => ({ key, label, ...(align && { align }) }));
 
-async function scopeLabel(user, sectionId) {
-  if (sectionId) return (await assertSection(user, sectionId)).name;
-  return user.role === 'ADMIN' ? 'All sections' : 'My sections';
+/** The request's filters: section, subject (row), quarter. */
+async function filters(user, q) {
+  const subject = await loadSubject(optInt(q.subjectId));
+  return { sectionId: optInt(q.sectionId), subjectId: subject?.id, subject, quarter: optInt(q.quarter) };
 }
 
-/** SF2-inspired daily attendance grid for one section and month. */
-async function sf2(user, q, settings) {
-  let sectionId = optInt(q.sectionId);
+async function scopeLabel(user, { sectionId, subject }) {
+  const where = sectionId ? (await assertSection(user, sectionId, subject?.id)).name : user.role === 'ADMIN' ? 'All sections' : subject ? 'My classes' : 'My sections';
+  return subject ? `${where} · ${subject.name}` : `${where} · All subjects`;
+}
+
+/** First section in view when a report needs exactly one. */
+async function oneSection(user, sectionId, subjectId) {
   if (!sectionId) {
-    const first = await prisma.section.findFirst({ where: sectionWhere(user), orderBy: { name: 'asc' } });
-    if (!first) throw new HttpError(400, 'No sections assigned');
+    const first = await prisma.section.findFirst({ where: sectionWhere(user, subjectId), orderBy: { name: 'asc' } });
+    if (!first) throw new HttpError(400, subjectId ? 'You have no sections for this subject' : 'No sections assigned');
     sectionId = first.id;
   }
-  const section = await assertSection(user, sectionId);
+  return assertSection(user, sectionId, subjectId);
+}
+
+/** Date range of an attendance report: range = day | week | month | year. */
+function periodRange(q, settings) {
+  const range = q.month === 'year' ? 'year' : ['day', 'week', 'month', 'year'].includes(q.range) ? q.range : 'month';
+  if (range === 'year') return { range, from: schoolYearStart(settings.academicYear), to: dateOnly(), label: `School year ${settings.academicYear}` };
+  if (range === 'day') {
+    const d = parseDay(q.date);
+    return { range, from: d, to: d, label: d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' }) };
+  }
+  if (range === 'week') {
+    const from = weekStart(parseDay(q.date));
+    const to = addDays(from, 6);
+    return { range, from, to, label: `Week of ${longDate(from)} – ${longDate(addDays(from, 4))}` };
+  }
+  const [from, to] = parseMonth(q.month);
+  return { range, from, to, label: monthLabel(from) };
+}
+
+const RANGE_TITLE = { day: 'Daily', week: 'Weekly', month: 'Monthly', year: 'School Year' };
+
+// ---- Attendance -------------------------------------------------------------------
+
+/** SF2-inspired daily attendance grid for one section and month (one subject's periods when filtered). */
+async function sf2(user, q, settings) {
+  const f = await filters(user, q);
+  const section = await oneSection(user, f.sectionId, f.subjectId);
   const teacher = section.teacherId ? await prisma.user.findUnique({ where: { id: section.teacherId } }) : null;
   const [from, to] = parseMonth(q.month);
   const days = [];
@@ -49,7 +89,7 @@ async function sf2(user, q, settings) {
   // Period records rolled up to one status per learner per day.
   const grouped = await prisma.attendanceRecord.groupBy({
     by: ['learnerId', 'date', 'status'],
-    where: { learnerId: { in: learners.map((l) => l.id) }, date: { gte: from, lte: to } },
+    where: { learnerId: { in: learners.map((l) => l.id) }, date: { gte: from, lte: to }, ...(f.subjectId && { schedule: { subjectId: f.subjectId } }) },
     _count: { _all: true },
   });
   const dayStatusBy = new Map(learnerDays(grouped).map((d) => [`${d.learnerId}|${d.date}`, d]));
@@ -94,9 +134,11 @@ async function sf2(user, q, settings) {
   const schoolDays = recordedDays.size;
   const presentSum = [...dailyPresent.values()].reduce((a, b) => a + b, 0);
   return {
-    title: 'School Form 2 (SF2) — Daily Attendance Report of Learners',
+    title: `School Form 2 (SF2) — Daily Attendance Report of Learners${f.subject ? ` · ${f.subject.name}` : ''}`,
     subtitle: `${settings.schoolName} · ${section.name} · ${monthLabel(from)} · Adviser: ${teacher ? `${teacher.firstName} ${teacher.lastName}` : '-'}`,
-    legend: 'Day status from the class-period records · Blank = present · x = absent all day · L = late/tardy · E = excused · C = in school but missed some periods',
+    legend: f.subject
+      ? `Day status from the ${f.subject.name} class periods only · Blank = present · x = absent · L = late/tardy · E = excused · C = attended part of the subject's periods`
+      : 'Day status from the class-period records · Blank = present · x = absent all day · L = late/tardy · E = excused · C = in school but missed some periods',
     columns: [
       { key: 'no', label: 'No.', align: 'right' },
       { key: 'name', label: "Learner's Name" },
@@ -119,21 +161,16 @@ async function sf2(user, q, settings) {
 
 /**
  * Daily Time Record (DTR) for one section and date: each learner's status and time in
- * for every class period that day, with the subject, time and room of each period.
+ * for every class period that day (one subject's periods when filtered).
  */
 async function dtr(user, q, settings) {
-  let sectionId = optInt(q.sectionId);
-  if (!sectionId) {
-    const first = await prisma.section.findFirst({ where: sectionWhere(user), orderBy: { name: 'asc' } });
-    if (!first) throw new HttpError(400, 'No sections assigned');
-    sectionId = first.id;
-  }
-  const section = await assertSection(user, sectionId);
+  const f = await filters(user, q);
+  const section = await oneSection(user, f.sectionId, f.subjectId);
   const date = parseDay(q.date);
   const dow = isoWeekdayUtc(date);
   const periods = await prisma.classSchedule.findMany({
-    where: { sectionId: section.id, dayOfWeek: dow },
-    include: { subject: true, teacher: true },
+    where: { sectionId: section.id, dayOfWeek: dow, ...(f.subjectId && { subjectId: f.subjectId }) },
+    include: { subject: true, teacher: true, sessions: { where: { date }, include: { competency: true } } },
     orderBy: { startTime: 'asc' },
   });
   const learners = await prisma.learner.findMany({
@@ -182,9 +219,9 @@ async function dtr(user, q, settings) {
   }
 
   return {
-    title: 'Daily Time Record (DTR) — Class Attendance',
+    title: `Daily Time Record (DTR) — Class Attendance${f.subject ? ` · ${f.subject.name}` : ''}`,
     subtitle: `${settings.schoolName} · ${section.name} · ${date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}`,
-    legend: `Cells show time in (L = late, more than ${settings.lateGraceMinutes} min after the period starts). Blank = not yet recorded.`,
+    legend: `Cells show time in (L = late, more than ${settings.lateGraceMinutes} min after the period starts). Blank = not yet recorded. Column notes show the competency taught.`,
     columns: [
       { key: 'no', label: 'No.', align: 'right' },
       { key: 'name', label: "Learner's Name" },
@@ -192,59 +229,54 @@ async function dtr(user, q, settings) {
       ...periods.map((per) => ({
         key: `p${per.id}`,
         label: `${label(per.startTime)}–${label(per.endTime)}`,
-        sub: `${per.subject.name} · ${per.room}${per.teacher ? ` · ${per.teacher.lastName}` : ''}`,
+        sub: `${per.subject.name} · ${per.room}${per.teacher ? ` · ${per.teacher.lastName}` : ''}${per.sessions[0]?.competency ? ` · ${per.sessions[0].competency.code}` : ''}`,
         align: 'center',
       })),
-      { key: 'day', label: 'Day status' },
+      { key: 'day', label: f.subject ? 'Status' : 'Day status' },
     ],
     rows: periods.length ? [...rows, totalRow] : [],
     summary: [
       { label: 'Class periods', value: periods.length || `None on ${['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][dow]}` },
       { label: 'Learners', value: learners.length },
       { label: 'Period attendance', value: recorded ? pct(round1((attended / recorded) * 100)) : '-' },
-      { label: 'Absent all day', value: rows.filter((r) => r.day === 'Absent').length },
+      { label: f.subject ? 'Absent' : 'Absent all day', value: rows.filter((r) => r.day === 'Absent').length },
       { label: 'Partial days', value: rows.filter((r) => String(r.day).startsWith('Partial')).length },
     ],
   };
 }
 
-/** Attendance summary per learner for a month (or the whole school year). */
+/** Attendance per learner for a day, week, month or the whole school year. */
 async function attendance(user, q, settings) {
-  const sectionId = optInt(q.sectionId);
-  const whole = q.month === 'year';
-  const [from, to] = whole ? [schoolYearStart(settings.academicYear), dateOnly()] : parseMonth(q.month);
-  const lw = learnerWhere(user, { sectionId });
+  const f = await filters(user, q);
+  const p = periodRange(q, settings);
+  const lw = learnerWhere(user, { sectionId: f.sectionId, subjectId: f.subjectId });
   const learners = await prisma.learner.findMany({ where: lw, include: { section: true }, orderBy: [{ section: { name: 'asc' } }, { lastName: 'asc' }] });
-  const metrics = await learnerMetrics(learners, settings, { from, to });
-  const series = await dailySeries(lw, from, to);
+  const [metrics, series, lessons] = await Promise.all([
+    learnerMetrics(learners, settings, { from: p.from, to: p.to, subjectId: f.subjectId }),
+    dailySeries(lw, p.from, p.to, { subjectId: f.subjectId }),
+    missedLessons({ learnerIds: learners.map((l) => l.id), subjectId: f.subjectId }),
+  ]);
   const t = totals(series);
-
-  // Weekly breakdown for the summary panel
-  const weeks = new Map();
-  for (const d of series) {
-    const day = new Date(`${d.date}T00:00:00Z`);
-    const key = dayKey(addDays(day, 1 - (day.getUTCDay() || 7)));
-    const list = weeks.get(key) ?? [];
-    list.push(d);
-    weeks.set(key, list);
-  }
+  const sub = p.range === 'year' || p.range === 'month' ? weeklySeries(series).map((w) => ({ label: `Week of ${w.week}`, value: pct(w.rate) })) : [];
 
   return {
-    title: whole ? 'Attendance Summary — School Year' : 'Attendance Summary — Monthly',
-    subtitle: `${await scopeLabel(user, sectionId)} · ${whole ? settings.academicYear : monthLabel(from)}`,
-    columns: [
-      { key: 'learnerNo', label: 'Learner ID' },
-      { key: 'name', label: 'Learner' },
-      { key: 'section', label: 'Section' },
-      { key: 'days', label: 'Days', align: 'right' },
-      { key: 'present', label: 'Present', align: 'right' },
-      { key: 'late', label: 'Late', align: 'right' },
-      { key: 'absent', label: 'Absent', align: 'right' },
-      { key: 'excused', label: 'Excused', align: 'right' },
-      { key: 'partial', label: 'Partial days', align: 'right' },
-      { key: 'missed', label: 'Periods missed', align: 'right' },
-      { key: 'rate', label: 'Period rate', align: 'right' },
-    ],
+    title: `Attendance Report — ${RANGE_TITLE[p.range]}`,
+    subtitle: `${await scopeLabel(user, f)} · ${p.label}`,
+    legend: f.subject ? `Counts are ${f.subject.name} class days; rate = ${f.subject.name} periods attended / recorded.` : 'Counts are school days; rate = class periods attended / recorded.',
+    columns: cols([
+      ['learnerNo', 'Learner ID'],
+      ['name', 'Learner'],
+      ['section', 'Section'],
+      ['days', 'Days', 'right'],
+      ['present', 'Present', 'right'],
+      ['late', 'Tardy', 'right'],
+      ['absent', 'Absent', 'right'],
+      ['excused', 'Excused', 'right'],
+      ['partial', 'Partial days', 'right'],
+      ['missed', 'Periods missed', 'right'],
+      ['rate', 'Attendance %', 'right'],
+      ['lessons', 'Lessons missed (school year)', 'right'],
+    ]),
     rows: learners.map((l) => {
       const m = metrics.get(l.id);
       return {
@@ -259,33 +291,125 @@ async function attendance(user, q, settings) {
         partial: m.partialDays,
         missed: m.periodsMissed,
         rate: pct(m.attendanceRate),
+        lessons: [...(lessons.missed.get(l.id)?.values() ?? [])].reduce((a, b) => a + b, 0),
       };
     }),
     summary: [
       { label: 'School days', value: series.length },
-      { label: 'Period attendance rate', value: pct(t.rate) },
-      { label: 'Whole-day absences', value: t.absent },
-      { label: 'Late days', value: t.late },
+      { label: 'Attendance rate', value: pct(t.rate) },
+      { label: f.subject ? 'Absences' : 'Whole-day absences', value: t.absent },
+      { label: 'Tardy', value: t.late },
       { label: 'Partial days', value: t.partial },
-      ...[...weeks].map(([week, list]) => ({ label: `Week of ${week}`, value: pct(totals(list).rate) })),
+      { label: `Below ${settings.attendanceTarget}% target`, value: [...metrics.values()].filter((m) => m.attendanceRate !== null && m.attendanceRate < settings.attendanceTarget).length },
+      ...sub,
     ],
   };
 }
 
+/** Subject-based attendance summary: per subject (all subjects) or per section (one subject). */
+async function subjects(user, q, settings) {
+  const f = await filters(user, q);
+  const p = periodRange(q, settings);
+  const lw = learnerWhere(user, { sectionId: f.sectionId, subjectId: f.subjectId });
+  const [rows, schedules] = await Promise.all([
+    prisma.attendanceRecord.groupBy({
+      by: ['learnerId', 'scheduleId', 'status'],
+      where: { learner: lw, date: { gte: p.from, lte: p.to }, ...(f.subjectId && { schedule: { subjectId: f.subjectId } }) },
+      _count: { _all: true },
+    }),
+    prisma.classSchedule.findMany({ include: { subject: true, section: true, teacher: true } }),
+  ]);
+  const scheduleById = new Map(schedules.map((s) => [s.id, s]));
+  const groups = new Map();
+  for (const r of rows) {
+    const s = scheduleById.get(r.scheduleId);
+    const key = f.subjectId ? s.sectionId : s.subjectId;
+    const g = groups.get(key) ?? {
+      name: f.subjectId ? s.section.name : s.subject.name,
+      kind: f.subjectId ? null : s.subject.kind,
+      teachers: new Set(),
+      PRESENT: 0,
+      LATE: 0,
+      ABSENT: 0,
+      EXCUSED: 0,
+      learners: new Map(),
+    };
+    if (s.teacher) g.teachers.add(`${s.teacher.firstName} ${s.teacher.lastName}`);
+    g[r.status] += r._count._all;
+    const l = g.learners.get(r.learnerId) ?? { total: 0, attended: 0 };
+    l.total += r._count._all;
+    if (r.status === 'PRESENT' || r.status === 'LATE') l.attended += r._count._all;
+    g.learners.set(r.learnerId, l);
+    groups.set(key, g);
+  }
+  const out = [...groups.values()]
+    .map((g) => {
+      const total = g.PRESENT + g.LATE + g.ABSENT + g.EXCUSED;
+      const rates = [...g.learners.values()].map((l) => rateOf(l.attended, l.total));
+      return {
+        name: g.name,
+        teacher: [...g.teachers].join(', '),
+        learners: g.learners.size,
+        periods: total,
+        present: g.PRESENT,
+        late: g.LATE,
+        absent: g.ABSENT,
+        excused: g.EXCUSED,
+        rate: pct(rateOf(g.PRESENT + g.LATE, total)),
+        below: rates.filter((r) => r !== null && r < settings.attendanceTarget).length,
+        _rate: rateOf(g.PRESENT + g.LATE, total) ?? 0,
+      };
+    })
+    .sort((a, b) => a._rate - b._rate)
+    .map(({ _rate, ...r }) => r);
+  const all = out.reduce((t, r) => ({ periods: t.periods + r.periods, attended: t.attended + r.present + r.late }), { periods: 0, attended: 0 });
+  return {
+    title: `Subject Attendance Summary — ${RANGE_TITLE[p.range]}`,
+    subtitle: `${await scopeLabel(user, f)} · ${p.label}`,
+    legend: 'Counts are class periods (learner × meeting). Rate = periods attended (present + tardy) / periods recorded.',
+    columns: cols([
+      ['name', f.subjectId ? 'Section' : 'Subject'],
+      ['teacher', 'Teacher(s)'],
+      ['learners', 'Learners', 'right'],
+      ['periods', 'Periods recorded', 'right'],
+      ['present', 'Present', 'right'],
+      ['late', 'Tardy', 'right'],
+      ['absent', 'Absent', 'right'],
+      ['excused', 'Excused', 'right'],
+      ['rate', 'Attendance %', 'right'],
+      ['below', `Learners < ${settings.attendanceTarget}%`, 'right'],
+    ]),
+    rows: out,
+    summary: [
+      { label: f.subjectId ? 'Sections' : 'Subjects', value: out.length },
+      { label: 'Overall attendance', value: pct(rateOf(all.attended, all.periods)) },
+      { label: 'Lowest', value: out[0] ? `${out[0].name} (${out[0].rate})` : '-' },
+    ],
+  };
+}
+
+// ---- Competencies and assessments -----------------------------------------------
+
+async function competencyList(user, f) {
+  return prisma.competency.findMany({
+    where: { ...competencyWhere(user, { subjectId: f.subjectId, sectionId: f.sectionId }), active: true, ...(f.quarter && { quarter: f.quarter }) },
+    orderBy: [{ learningArea: 'asc' }, { quarter: 'asc' }, { learningPeriod: 'asc' }, { code: 'asc' }],
+  });
+}
+
+/** Competency mastery: learners mastered / in progress / needing support per competency. */
 async function competency(user, q, settings) {
-  const sectionId = optInt(q.sectionId);
-  const quarter = optInt(q.quarter);
-  const learners = await prisma.learner.findMany({ where: learnerWhere(user, { sectionId }), select: { id: true, sectionId: true } });
-  const metrics = await learnerMetrics(learners, settings, { quarter });
+  const f = await filters(user, q);
+  const learners = await prisma.learner.findMany({ where: learnerWhere(user, f), select: { id: true, sectionId: true } });
+  const [metrics, comps] = await Promise.all([learnerMetrics(learners, settings, { quarter: f.quarter, subjectId: f.subjectId }), competencyList(user, f)]);
   const stats = competencyStats(metrics, settings);
-  const comps = await prisma.competency.findMany({ where: { active: true, ...(quarter && { quarter }) }, orderBy: [{ learningArea: 'asc' }, { code: 'asc' }] });
   const rows = comps.map((c) => {
     const s = stats.get(c.id);
     return {
       code: c.code,
       learningArea: c.learningArea,
       title: c.title,
-      quarter: `Q${c.quarter}`,
+      quarter: termLabel(c.quarter),
       assessed: s?.assessed ?? 0,
       mastered: s?.MASTERED ?? 0,
       inProgress: s?.IN_PROGRESS ?? 0,
@@ -295,23 +419,24 @@ async function competency(user, q, settings) {
       status: s ? (s.masteryRate >= settings.masteryTarget ? 'On Track' : s.masteryRate >= settings.masteryTarget - 15 ? 'Monitor' : 'Needs Support') : 'Not assessed',
     };
   });
-  const rates = [...stats.values()].map((s) => s.masteryRate).filter((r) => r !== null);
+  const rates = comps.map((c) => stats.get(c.id)?.masteryRate).filter((r) => r !== null && r !== undefined);
   return {
-    title: 'Competency Report — Progress & Mastery',
-    subtitle: `${await scopeLabel(user, sectionId)} · ${quarter ? `Quarter ${quarter}` : 'All quarters'} · Mastery target ${settings.masteryTarget}%`,
-    columns: [
-      { key: 'code', label: 'Code' },
-      { key: 'learningArea', label: 'Learning Area' },
-      { key: 'title', label: 'Competency' },
-      { key: 'quarter', label: 'Qtr' },
-      { key: 'assessed', label: 'Assessed', align: 'right' },
-      { key: 'mastered', label: 'Mastered', align: 'right' },
-      { key: 'inProgress', label: 'In Progress', align: 'right' },
-      { key: 'needsSupport', label: 'Needs Support', align: 'right' },
-      { key: 'average', label: 'Average', align: 'right' },
-      { key: 'mastery', label: 'Mastery', align: 'right' },
-      { key: 'status', label: 'Status' },
-    ],
+    title: 'Competency Mastery Report',
+    subtitle: `${await scopeLabel(user, f)} · ${f.quarter ? termLabel(f.quarter) : 'All terms'} · Mastery target ${settings.masteryTarget}%`,
+    legend: 'Mastery uses quizzes, performance tasks, exams and post-tests (pre-tests are excluded).',
+    columns: cols([
+      ['code', 'Code'],
+      ['learningArea', 'Subject'],
+      ['title', 'Competency'],
+      ['quarter', 'Term'],
+      ['assessed', 'Assessed', 'right'],
+      ['mastered', 'Mastered', 'right'],
+      ['inProgress', 'In Progress', 'right'],
+      ['needsSupport', 'Needs Support', 'right'],
+      ['average', 'Average', 'right'],
+      ['mastery', 'Mastery', 'right'],
+      ['status', 'Status'],
+    ]),
     rows,
     summary: [
       { label: 'Competencies', value: comps.length },
@@ -321,11 +446,75 @@ async function competency(user, q, settings) {
   };
 }
 
+/** Competency completion: lessons logged, assessments, pre/post-tests and sections completed. */
+async function completionReport(user, q, settings) {
+  const f = await filters(user, q);
+  const comps = await competencyList(user, f);
+  const ids = comps.map((c) => c.id);
+  const [cov, assessed] = await Promise.all([
+    coverage(user, { subjectId: f.subjectId, sectionId: f.sectionId, competencyIds: ids, settings }),
+    prisma.assessment.groupBy({
+      by: ['competencyId'],
+      where: { competencyId: { in: ids }, section: { ...sectionWhere(user, f.subjectId), ...(f.sectionId && { id: f.sectionId }) } },
+      _count: { _all: true },
+    }),
+  ]);
+  const assessmentCount = new Map(assessed.map((a) => [a.competencyId, a._count._all]));
+  const rows = comps.map((c) => {
+    const done = completion(c, cov, assessmentCount.get(c.id) ?? 0);
+    return {
+      code: c.code,
+      learningArea: c.learningArea,
+      title: c.title,
+      quarter: termLabel(c.quarter),
+      period: c.learningPeriod ?? '',
+      lessons: done.lessons,
+      lastLesson: done.lastLesson ?? '-',
+      assessments: assessmentCount.get(c.id) ?? 0,
+      pretest: done.tests.filter((t) => t.preTaken).length,
+      posttest: done.completedSections,
+      sections: `${done.completedSections}/${done.sections}`,
+      status: COMPLETION_LABEL[done.status],
+    };
+  });
+  const count = (s) => rows.filter((r) => r.status === COMPLETION_LABEL[s]).length;
+  return {
+    title: 'Competency Completion Report',
+    subtitle: `${await scopeLabel(user, f)} · ${f.quarter ? termLabel(f.quarter) : 'All terms'} · ${settings.academicYear}`,
+    legend: 'Completed = post-test recorded in every section that takes the subject. In progress = lessons logged, pre-test given or assessments recorded.',
+    columns: cols([
+      ['code', 'Code'],
+      ['learningArea', 'Subject'],
+      ['title', 'Competency'],
+      ['quarter', 'Term'],
+      ['period', 'Learning period'],
+      ['lessons', 'Lessons logged', 'right'],
+      ['lastLesson', 'Last lesson'],
+      ['assessments', 'Assessments', 'right'],
+      ['pretest', 'Sections pre-tested', 'right'],
+      ['posttest', 'Sections post-tested', 'right'],
+      ['sections', 'Completed sections', 'right'],
+      ['status', 'Status'],
+    ]),
+    rows,
+    summary: [
+      { label: 'Competencies', value: rows.length },
+      { label: 'Completed', value: count('COMPLETED') },
+      { label: 'In progress', value: count('IN_PROGRESS') },
+      { label: 'Not started', value: count('NOT_STARTED') },
+      { label: 'Completion rate', value: rows.length ? pct(round1((count('COMPLETED') / rows.length) * 100)) : '-' },
+    ],
+  };
+}
+
 async function assessment(user, q, settings) {
-  const sectionId = optInt(q.sectionId);
-  const quarter = optInt(q.quarter);
+  const f = await filters(user, q);
   const list = await prisma.assessment.findMany({
-    where: { ...(quarter && { quarter }), section: { ...sectionWhere(user), ...(sectionId && { id: sectionId }) } },
+    where: {
+      ...(f.quarter && { quarter: f.quarter }),
+      ...(f.subjectId && { competency: { subjectId: f.subjectId } }),
+      section: { ...sectionWhere(user, f.subjectId), ...(f.sectionId && { id: f.sectionId }) },
+    },
     include: { competency: true, section: true, scores: { where: { learner: { status: 'ACTIVE' } } } },
     orderBy: [{ date: 'desc' }],
   });
@@ -350,20 +539,20 @@ async function assessment(user, q, settings) {
   });
   return {
     title: 'Assessment Report — Performance Analysis',
-    subtitle: `${await scopeLabel(user, sectionId)} · ${quarter ? `Quarter ${quarter}` : 'All quarters'}`,
-    columns: [
-      { key: 'date', label: 'Date' },
-      { key: 'title', label: 'Assessment' },
-      { key: 'type', label: 'Type' },
-      { key: 'competency', label: 'Competency' },
-      { key: 'learningArea', label: 'Learning Area' },
-      { key: 'section', label: 'Section' },
-      { key: 'maxScore', label: 'Max', align: 'right' },
-      { key: 'average', label: 'Average', align: 'right' },
-      { key: 'passed', label: 'Passed', align: 'right' },
-      { key: 'highest', label: 'Highest', align: 'right' },
-      { key: 'lowest', label: 'Lowest', align: 'right' },
-    ],
+    subtitle: `${await scopeLabel(user, f)} · ${f.quarter ? termLabel(f.quarter) : 'All terms'}`,
+    columns: cols([
+      ['date', 'Date'],
+      ['title', 'Assessment'],
+      ['type', 'Type'],
+      ['competency', 'Competency'],
+      ['learningArea', 'Subject'],
+      ['section', 'Section'],
+      ['maxScore', 'Max', 'right'],
+      ['average', 'Average', 'right'],
+      ['passed', 'Passed', 'right'],
+      ['highest', 'Highest', 'right'],
+      ['lowest', 'Lowest', 'right'],
+    ]),
     rows,
     summary: [
       { label: 'Assessments', value: list.length },
@@ -374,11 +563,137 @@ async function assessment(user, q, settings) {
   };
 }
 
+function prePostWhere(user, f, settings, q) {
+  return {
+    academicYear: settings.academicYear,
+    ...(f.quarter && { quarter: f.quarter }),
+    ...(optInt(q.competencyId) && { competencyId: optInt(q.competencyId) }),
+    ...(f.subjectId && { competency: { subjectId: f.subjectId } }),
+    section: { ...sectionWhere(user, f.subjectId), ...(f.sectionId && { id: f.sectionId }) },
+  };
+}
+
+/** Pre-test and post-test comparison, one row per learner and competency. */
+async function prepost(user, q, settings) {
+  const f = await filters(user, q);
+  const { records } = await loadPrePost(prePostWhere(user, f, settings, q), settings);
+  const s = summarize(records, settings);
+  records.sort((a, b) => a.quarter - b.quarter || a.competencyCode.localeCompare(b.competencyCode) || a.section.localeCompare(b.section) || a.learner.localeCompare(b.learner));
+  return {
+    title: 'Pre-test and Post-test Comparison Report',
+    subtitle: `${await scopeLabel(user, f)} · ${f.quarter ? termLabel(f.quarter) : 'All terms'} · ${settings.academicYear}`,
+    legend: 'Percentage = score / total items × 100. Learning gain = post-test % − pre-test % (percentage points).',
+    columns: cols([
+      ['learner', "Learner's Name"],
+      ['section', 'Section'],
+      ['subject', 'Subject'],
+      ['quarter', 'Term'],
+      ['code', 'Competency'],
+      ['title', 'Description'],
+      ['pre', 'Pre-test', 'right'],
+      ['prePct', 'Pre %', 'right'],
+      ['post', 'Post-test', 'right'],
+      ['postPct', 'Post %', 'right'],
+      ['gain', 'Gain', 'right'],
+      ['interpretation', 'Interpretation'],
+    ]),
+    rows: records.map((r) => ({
+      learner: r.learner,
+      section: r.section,
+      subject: r.subject,
+      quarter: termLabel(r.quarter),
+      code: r.competencyCode,
+      title: r.competencyTitle,
+      pre: r.preScore === null ? '-' : `${r.preScore}/${r.preTotal}`,
+      prePct: pct(r.prePct),
+      post: r.postScore === null ? '-' : `${r.postScore}/${r.postTotal}`,
+      postPct: pct(r.postPct),
+      gain: signed(r.gain),
+      interpretation: r.interpretation,
+    })),
+    summary: [
+      { label: 'Records', value: records.length },
+      { label: 'Average pre-test', value: pct(s.avgPre) },
+      { label: 'Average post-test', value: pct(s.avgPost) },
+      { label: 'Average gain', value: signed(s.avgGain) },
+      { label: 'Improved', value: s.improved },
+      { label: 'Maintained', value: s.maintained },
+      { label: 'Declined', value: s.declined },
+      { label: 'Awaiting post-test', value: s.pending },
+    ],
+  };
+}
+
+/** Learning gain analysis per class (section × competency). */
+async function gain(user, q, settings) {
+  const f = await filters(user, q);
+  const { tests, records } = await loadPrePost(prePostWhere(user, f, settings, q), settings);
+  const rows = testRows(tests, records, settings);
+  const s = summarize(records, settings);
+  const verdict = (t) =>
+    t.completed === 0
+      ? 'Awaiting post-test'
+      : t.avgGain >= settings.minLearningGain && t.masteredPost >= t.postTaken / 2
+        ? 'Effective'
+        : t.avgGain >= settings.minLearningGain
+          ? 'Gaining, below mastery'
+          : 'Low gain: reteach';
+  return {
+    title: 'Learning Gain Analysis',
+    subtitle: `${await scopeLabel(user, f)} · ${f.quarter ? termLabel(f.quarter) : 'All terms'} · ${settings.academicYear}`,
+    legend: `Gain = average post-test % − average pre-test % of learners with both scores. Minimum expected gain ${settings.minLearningGain} points; mastery target ${settings.masteryTarget}%.`,
+    columns: cols([
+      ['subject', 'Subject'],
+      ['code', 'Competency'],
+      ['section', 'Section'],
+      ['quarter', 'Term'],
+      ['completed', 'Learners (pre + post)', 'right'],
+      ['avgPre', 'Avg pre %', 'right'],
+      ['avgPost', 'Avg post %', 'right'],
+      ['avgGain', 'Avg gain', 'right'],
+      ['improved', 'Improved', 'right'],
+      ['maintained', 'Maintained', 'right'],
+      ['declined', 'Declined', 'right'],
+      ['mastered', 'Mastered (post)', 'right'],
+      ['verdict', 'Interpretation'],
+    ]),
+    rows: rows.map((t) => ({
+      subject: t.subject,
+      code: t.competencyCode,
+      section: t.section,
+      quarter: termLabel(t.quarter),
+      completed: t.completed,
+      avgPre: pct(t.avgPreCompleted ?? t.avgPre),
+      avgPost: pct(t.avgPostCompleted),
+      avgGain: signed(t.avgGain),
+      improved: t.improved,
+      maintained: t.maintained,
+      declined: t.declined,
+      mastered: t.postTaken ? `${t.masteredPost}/${t.postTaken}` : '-',
+      verdict: verdict(t),
+    })),
+    summary: [
+      { label: 'Classes tested', value: rows.length },
+      { label: 'Average gain', value: signed(s.avgGain) },
+      { label: 'Improved', value: s.improved },
+      { label: 'Maintained', value: s.maintained },
+      { label: 'Declined', value: s.declined },
+      { label: `Gain < ${settings.minLearningGain} (below target)`, value: s.limitedGain },
+    ],
+  };
+}
+
+// ---- Learners and alerts ----------------------------------------------------------
+
 async function performance(user, q, settings, { consolidated = false } = {}) {
-  const sectionId = optInt(q.sectionId);
-  const learners = await prisma.learner.findMany({ where: learnerWhere(user, { sectionId }), include: { section: true }, orderBy: [{ lastName: 'asc' }] });
-  const metrics = await learnerMetrics(learners, settings);
-  const openAlerts = await prisma.alert.groupBy({ by: ['learnerId'], where: { status: { not: 'RESOLVED' }, learnerId: { in: learners.map((l) => l.id) } }, _count: { _all: true } });
+  const f = await filters(user, q);
+  const learners = await prisma.learner.findMany({ where: learnerWhere(user, f), include: { section: true }, orderBy: [{ lastName: 'asc' }] });
+  const metrics = await learnerMetrics(learners, settings, { subjectId: f.subjectId });
+  const openAlerts = await prisma.alert.groupBy({
+    by: ['learnerId'],
+    where: { ...alertScope(user, { subjectId: f.subjectId }), status: { not: 'RESOLVED' }, learnerId: { in: learners.map((l) => l.id) } },
+    _count: { _all: true },
+  });
   const alertsBy = new Map(openAlerts.map((a) => [a.learnerId, a._count._all]));
   const rows = learners
     .map((l) => {
@@ -406,7 +721,7 @@ async function performance(user, q, settings, { consolidated = false } = {}) {
   const count = (s) => rows.filter((r) => r.status === s).length;
   const columns = consolidated
     ? ['learnerNo', 'name', 'section', 'attendance', 'absences', 'average', 'competencies', 'alerts', 'status', 'action']
-    : ['learnerNo', 'name', 'section', 'attendance', 'average', 'descriptor', 'status', 'action'];
+    : ['learnerNo', 'name', 'section', 'attendance', 'average', 'descriptor', 'competencies', 'status', 'action'];
   const LABELS = {
     learnerNo: 'Learner ID',
     name: 'Learner',
@@ -422,8 +737,8 @@ async function performance(user, q, settings, { consolidated = false } = {}) {
   };
   const right = new Set(['attendance', 'absences', 'average', 'competencies', 'alerts']);
   return {
-    title: consolidated ? 'Consolidated Report — Attendance + Performance' : 'Learner Performance Report — Analytics',
-    subtitle: `${await scopeLabel(user, sectionId)} · ${settings.academicYear}`,
+    title: consolidated ? 'Consolidated Report — Attendance + Performance' : 'Learner Performance Report',
+    subtitle: `${await scopeLabel(user, f)} · ${settings.academicYear}`,
     columns: columns.map((key) => ({ key, label: LABELS[key], ...(right.has(key) && { align: 'right' }) })),
     rows,
     summary: [
@@ -435,35 +750,96 @@ async function performance(user, q, settings, { consolidated = false } = {}) {
   };
 }
 
-async function alerts(user, q) {
+/** Learners needing instructional support: not on track, or with open alerts, and what to do. */
+async function support(user, q, settings) {
   await syncAlerts();
-  const sectionId = optInt(q.sectionId);
+  const f = await filters(user, q);
+  const learners = await prisma.learner.findMany({ where: learnerWhere(user, f), include: { section: true }, orderBy: [{ lastName: 'asc' }] });
+  const [metrics, alerts] = await Promise.all([
+    learnerMetrics(learners, settings, { subjectId: f.subjectId }),
+    prisma.alert.findMany({
+      where: { ...alertScope(user, { sectionId: f.sectionId, subjectId: f.subjectId }), status: { not: 'RESOLVED' }, learnerId: { in: learners.map((l) => l.id) } },
+      include: { competency: true, subject: true },
+      orderBy: { level: 'asc' },
+    }),
+  ]);
+  const alertsBy = new Map();
+  for (const a of alerts) alertsBy.set(a.learnerId, [...(alertsBy.get(a.learnerId) ?? []), a]);
+  const rows = learners
+    .map((l) => ({ l, m: metrics.get(l.id), a: alertsBy.get(l.id) ?? [] }))
+    .filter(({ m, a }) => m.status !== 'ON_TRACK' || a.length)
+    .sort((x, y) => STATUS_ORDER[x.m.status] - STATUS_ORDER[y.m.status] || y.a.length - x.a.length || learnerName(x.l).localeCompare(learnerName(y.l)))
+    .map(({ l, m, a }) => ({
+      learnerNo: l.learnerNo,
+      name: learnerName(l),
+      section: l.section.name,
+      attendance: pct(m.attendanceRate),
+      average: pct(m.assessmentAvg),
+      status: MONITORING[m.status],
+      issues: a.length ? [...new Set(a.map((x) => x.title))].join('; ') : m.descriptor,
+      interventions: [...new Set(a.map((x) => INTERVENTION_LABEL[x.intervention]).filter(Boolean))].join(', ') || '-',
+      action: m.action,
+    }));
+  return {
+    title: 'Learners Needing Instructional Support',
+    subtitle: `${await scopeLabel(user, f)} · ${settings.academicYear}`,
+    legend: 'Learners not on track (attendance or assessment below target) or with open instructional alerts, most urgent first.',
+    columns: cols([
+      ['learnerNo', 'Learner ID'],
+      ['name', 'Learner'],
+      ['section', 'Section'],
+      ['attendance', 'Attendance', 'right'],
+      ['average', 'Assessment Avg', 'right'],
+      ['status', 'Status'],
+      ['issues', 'Issues'],
+      ['interventions', 'Interventions'],
+      ['action', 'Recommended Action'],
+    ]),
+    rows,
+    summary: [
+      { label: 'Learners in view', value: learners.length },
+      { label: 'Needing support', value: rows.length },
+      { label: 'At Risk', value: rows.filter((r) => r.status === 'At Risk').length },
+      ...Object.entries(INTERVENTION_LABEL).map(([k, label]) => ({ label, value: new Set(alerts.filter((a) => a.intervention === k).map((a) => a.learnerId)).size })),
+    ],
+  };
+}
+
+async function alertsReport(user, q) {
+  await syncAlerts();
+  const f = await filters(user, q);
   const items = await prisma.alert.findMany({
-    where: { section: { ...sectionWhere(user), ...(sectionId && { id: sectionId }) }, ...(q.status === 'all' ? {} : { status: { not: 'RESOLVED' } }) },
-    include: { learner: true, section: true, followUpBy: true },
+    where: { ...alertScope(user, { sectionId: f.sectionId, subjectId: f.subjectId }), ...(q.status === 'all' ? {} : { status: { not: 'RESOLVED' } }) },
+    include: { learner: true, section: true, followUpBy: true, subject: true, competency: true },
     orderBy: [{ level: 'asc' }, { updatedAt: 'desc' }],
   });
   const count = (level) => items.filter((a) => a.level === level).length;
   return {
     title: 'Instructional Alerts — Summary',
-    subtitle: `${await scopeLabel(user, sectionId)} · ${q.status === 'all' ? 'All alerts' : 'Open and followed-up alerts'}`,
-    columns: [
-      { key: 'level', label: 'Level' },
-      { key: 'title', label: 'Issue' },
-      { key: 'learner', label: 'Learner' },
-      { key: 'section', label: 'Section' },
-      { key: 'detail', label: 'Detail' },
-      { key: 'action', label: 'Recommended Action' },
-      { key: 'status', label: 'Status' },
-      { key: 'followUp', label: 'Follow-up' },
-      { key: 'date', label: 'Updated' },
-    ],
+    subtitle: `${await scopeLabel(user, f)} · ${q.status === 'all' ? 'All alerts' : 'Open and followed-up alerts'}`,
+    columns: cols([
+      ['level', 'Level'],
+      ['title', 'Issue'],
+      ['learner', 'Learner'],
+      ['section', 'Section'],
+      ['subject', 'Subject'],
+      ['competency', 'Competency'],
+      ['detail', 'Reason'],
+      ['intervention', 'Intervention'],
+      ['action', 'Recommended Action'],
+      ['status', 'Status'],
+      ['followUp', 'Follow-up'],
+      ['date', 'Updated'],
+    ]),
     rows: items.map((a) => ({
       level: LEVEL[a.level],
       title: a.title,
       learner: a.learner ? learnerName(a.learner) : '(whole class)',
       section: a.section?.name ?? '-',
+      subject: a.subject?.name ?? 'All subjects',
+      competency: a.competency?.code ?? '-',
       detail: a.detail,
+      intervention: INTERVENTION_LABEL[a.intervention] ?? '-',
       action: a.action,
       status: ALERT_STATUS[a.status],
       followUp: a.followUpNote ? `${a.followUpNote}${a.followUpBy ? ` (${a.followUpBy.firstName} ${a.followUpBy.lastName})` : ''}` : '',
@@ -481,10 +857,15 @@ const REPORTS = {
   sf2,
   dtr,
   attendance,
+  subjects,
   competency,
+  completion: completionReport,
   assessment,
+  prepost,
+  gain,
   performance: (u, q, s) => performance(u, q, s),
-  alerts,
+  support,
+  alerts: alertsReport,
   consolidated: (u, q, s) => performance(u, q, s, { consolidated: true }),
 };
 

@@ -32,3 +32,9 @@ button.kpi-tile {
   app-icon { color: var(--brand); margin-top: 2px; }
 }
 .prev { padding: 8px 12px; border-left: 3px solid var(--line); color: var(--text-2); }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.chips .badge { border: 1px solid transparent; cursor: pointer; font: inherit; font-size: 0.74rem; font-weight: 700; }
+.chips .badge.sel { border-color: currentColor; }
+.subj { min-width: 140px; }
+.action .badge { margin-bottom: 4px; }

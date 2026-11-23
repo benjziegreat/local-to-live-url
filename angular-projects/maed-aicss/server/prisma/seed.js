@@ -134,6 +134,16 @@ const STRUGGLES = { 'Grade 11 – HUMSS A': { 'GM-Q2-01': -14 }, 'Grade 12 – A
 const SY_START = '2026-06-15';
 const HOLIDAYS = new Set(['2026-08-21', '2026-08-31', '2026-11-02']);
 const QUARTER_END = { 1: '2026-08-28' };
+const QUARTER_START = { 1: SY_START, 2: '2026-08-31' };
+const quarterOf = (d) => (iso(d) >= QUARTER_START[2] ? 2 : 1);
+
+/** "Weeks 1–5" style learning period of the k-th of n competencies in a 10-week quarter. */
+function learningPeriod(k, n) {
+  const size = Math.floor(10 / n);
+  const from = k * size + 1;
+  const to = k === n - 1 ? 10 : from + size - 1;
+  return from === to ? `Week ${from}` : `Weeks ${from}–${to}`;
+}
 
 /**
  * Weekly timetable for every section, Monday to Friday.
@@ -190,6 +200,9 @@ async function main() {
   console.log('Clearing existing data...');
   await prisma.activityLog.deleteMany();
   await prisma.alert.deleteMany();
+  await prisma.prePostScore.deleteMany();
+  await prisma.prePostTest.deleteMany();
+  await prisma.classSession.deleteMany();
   await prisma.classSchedule.deleteMany();
   await prisma.assessmentScore.deleteMany();
   await prisma.assessment.deleteMany();
@@ -240,8 +253,19 @@ async function main() {
 
   const comps = [];
   for (const [code, subjectCode, quarter, title] of COMPETENCIES) {
-    const c = await prisma.competency.create({ data: { code, learningArea: subjectByCode[subjectCode].name, quarter, title } });
+    const siblings = COMPETENCIES.filter((x) => x[1] === subjectCode && x[2] === quarter);
+    const k = siblings.findIndex((x) => x[0] === code);
+    const subject = subjectByCode[subjectCode];
+    const c = await prisma.competency.create({
+      data: { code, subjectId: subject.id, learningArea: subject.name, quarter, title, learningPeriod: learningPeriod(k, siblings.length) },
+    });
     comps.push({ ...c, subjectCode });
+  }
+  // Competencies taught in each subject and quarter, in teaching order.
+  const compsBy = new Map();
+  for (const c of comps) {
+    const key = `${c.subjectId}|${c.quarter}`;
+    compsBy.set(key, [...(compsBy.get(key) ?? []), c]);
   }
 
   const learners = [];
@@ -356,6 +380,27 @@ async function main() {
   }
   await flush();
 
+  // Lesson log: the competency covered in every class meeting. Each quarter's school days
+  // are split evenly across that subject's competencies for the quarter.
+  console.log('Logging lessons (competency per class meeting)...');
+  const quarterDays = { 1: schoolDays.filter((d) => quarterOf(d) === 1), 2: schoolDays.filter((d) => quarterOf(d) === 2) };
+  const sessionRows = [];
+  for (const [key, periods] of periodsBy) {
+    const dow = Number(key.split('|')[1]);
+    for (const p of periods) {
+      for (const d of schoolDays) {
+        if (d.getUTCDay() !== dow) continue;
+        const q = quarterOf(d);
+        const list = compsBy.get(`${p.subjectId}|${q}`);
+        if (!list) continue;
+        const i = quarterDays[q].findIndex((x) => x.getTime() === d.getTime());
+        const c = list[Math.min(list.length - 1, Math.floor((i * list.length) / quarterDays[q].length))];
+        sessionRows.push({ scheduleId: p.id, date: d, competencyId: c.id, recordedById: p.teacherId });
+      }
+    }
+  }
+  for (let i = 0; i < sessionRows.length; i += 5000) await prisma.classSession.createMany({ data: sessionRows.slice(i, i + 5000) });
+
   console.log('Generating assessments...');
   let scoreCount = 0;
   for (const section of sectionRows) {
@@ -386,12 +431,12 @@ async function main() {
         scoreCount += scores.length;
       }
     }
-    // Quarter 1 examination per subject
+    // 1st Term examination per subject
     for (const code of subjects) {
       const c = mine.find((x) => x.subjectCode === code && x.quarter === 1);
       const assessment = await prisma.assessment.create({
         data: {
-          title: `Q1 Exam: ${subjectByCode[code].name}`,
+          title: `1st Term Exam: ${subjectByCode[code].name}`,
           type: 'QUARTERLY_EXAM',
           competencyId: c.id,
           sectionId: section.id,
@@ -411,6 +456,56 @@ async function main() {
     }
   }
 
+  // Competency-level pre-tests (before instruction) and post-tests (after). 1st Term tests
+  // are complete; 2nd Term post-tests are done in half the sections, the rest are pending.
+  console.log('Generating competency pre-tests and post-tests...');
+  let prePostCount = 0;
+  for (const [si, section] of sectionRows.entries()) {
+    const roster = learners.filter((l) => l.sectionId === section.id);
+    const subjects = [...CORE, section.elective];
+    for (const c of comps.filter((x) => subjects.includes(x.subjectCode))) {
+      const list = compsBy.get(`${c.subjectId}|${c.quarter}`);
+      const k = list.indexOf(c);
+      const days = quarterDays[c.quarter];
+      if (!days.length) continue;
+      const startDay = days[Math.floor((k * days.length) / list.length)];
+      const endDay = days[Math.max(0, Math.floor(((k + 1) * days.length) / list.length) - 1)];
+      const postGiven = c.quarter === 1 || si % 2 === 0;
+      const total = c.subjectCode === 'GENMATH' || c.subjectCode === 'PHYS' ? 25 : 20;
+      const test = await prisma.prePostTest.create({
+        data: {
+          sectionId: section.id,
+          competencyId: c.id,
+          academicYear: '2026-2027',
+          quarter: c.quarter,
+          preTotal: total,
+          postTotal: total,
+          preDate: startDay,
+          postDate: postGiven ? endDay : null,
+          createdById: users[SUBJECT_TEACHER[c.subjectCode]].id,
+        },
+      });
+      const struggle = STRUGGLES[section.name]?.[c.code] ?? 0;
+      const scores = [];
+      for (const l of roster) {
+        const r = rand();
+        // A few learners already know the competency; a few barely move after instruction.
+        const prePct = r < 0.03 ? clamp(gauss(92, 4), 80, 100) : clamp(gauss(l.ability - 28 + DIFFICULTY[c.subjectCode], 10), 5, 100);
+        let postPct = clamp(gauss(l.ability + DIFFICULTY[c.subjectCode] + struggle - l.absentP * 30, 7), 20, 100);
+        if (r > 0.94) postPct = clamp(prePct + gauss(1, 5), 0, 100);
+        const missedPost = rand() < l.absentP * 0.8;
+        scores.push({
+          testId: test.id,
+          learnerId: l.id,
+          preScore: Math.round((prePct / 100) * total),
+          postScore: postGiven && !missedPost ? Math.round((Math.max(prePct > 85 ? prePct : 0, postPct) / 100) * total) : null,
+        });
+      }
+      await prisma.prePostScore.createMany({ data: scores });
+      prePostCount += scores.length;
+    }
+  }
+
   const admin = users['admin@aicss.edu'];
   const maria = users['teacher@aicss.edu'];
   await prisma.activityLog.createMany({
@@ -424,7 +519,8 @@ async function main() {
 
   console.log(
     `Seeded ${SUBJECTS.length} subjects, ${sectionRows.length} sections, ${learners.length} learners, ${timetable.length} class meetings/week (no conflicts), ` +
-      `${schoolDays.length} school days (${recordCount} class-period attendance records), ${comps.length} competencies, ${scoreCount} scores.`,
+      `${schoolDays.length} school days (${recordCount} class-period attendance records, ${sessionRows.length} lesson logs), ${comps.length} competencies, ` +
+      `${scoreCount} assessment scores, ${prePostCount} pre/post-test records.`,
   );
   console.log('Instructional alerts are generated automatically on first load.');
 }

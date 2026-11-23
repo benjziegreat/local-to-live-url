@@ -46,8 +46,15 @@ function alertRow(a) {
     learnerId: a.learnerId,
     learner: a.learner ? learnerName(a.learner) : null,
     learnerNo: a.learner?.learnerNo ?? null,
+    sectionId: a.sectionId,
     section: a.section?.name ?? null,
+    subjectId: a.subjectId ?? null,
+    subject: a.subject?.name ?? null,
+    intervention: a.intervention ?? null,
+    competencyId: a.competencyId ?? null,
     competency: a.competency ? `${a.competency.code}: ${a.competency.learningArea}` : null,
+    competencyCode: a.competency?.code ?? null,
+    competencyTitle: a.competency?.title ?? null,
     followUpNote: a.followUpNote,
     followUpBy: a.followUpBy ? `${a.followUpBy.firstName} ${a.followUpBy.lastName}` : null,
     followUpAt: a.followUpAt,
@@ -56,6 +63,13 @@ function alertRow(a) {
   };
 }
 
-const ALERT_INCLUDE = { learner: true, section: true, competency: true, followUpBy: true };
+const ALERT_INCLUDE = { learner: true, section: true, competency: true, subject: true, followUpBy: true };
 
-module.exports = { learnerName, learnerRow, alertRow, ALERT_INCLUDE };
+const INTERVENTION_LABEL = { RETEACHING: 'Reteaching', REMEDIATION: 'Remediation', ENRICHMENT: 'Enrichment', CATCH_UP: 'Catch-up', ATTENDANCE: 'Attendance follow-up' };
+
+/** The school year has three terms (stored as `quarter`): 1 -> "1st Term". */
+function termLabel(n) {
+  return n ? `${{ 1: '1st', 2: '2nd', 3: '3rd' }[n] ?? `${n}th`} Term` : '-';
+}
+
+module.exports = { learnerName, learnerRow, alertRow, ALERT_INCLUDE, INTERVENTION_LABEL, termLabel };

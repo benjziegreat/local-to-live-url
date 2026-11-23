@@ -3,21 +3,22 @@
     <div>
       <h1>{{ title() }}</h1>
       @if (data(); as d) {
-        <p>{{ d.settings.schoolLevel }} • Academic Year {{ d.settings.academicYear }} • Quarter {{ d.settings.currentQuarter }}</p>
+        <p>{{ d.settings.schoolLevel }} • Academic Year {{ d.settings.academicYear }} • {{ d.settings.currentQuarter | term }} • <strong>{{ subject.label() }}</strong></p>
       }
     </div>
-    @if (data(); as d) {
-      @if (d.sections.length > 1) {
-        <div class="tools">
+    <div class="tools">
+      <app-subject-filter />
+      @if (data(); as d) {
+        @if (d.sections.length > 1) {
           <select class="input" [(ngModel)]="sectionId" (ngModelChange)="load()" aria-label="Section">
-            <option [ngValue]="null">{{ auth.isAdmin() ? 'All sections' : 'All my sections' }}</option>
+            <option [ngValue]="null">{{ auth.isAdmin() ? 'All sections' : subject.selectedId() ? 'All my classes' : 'All my sections' }}</option>
             @for (s of d.sections; track s.id) {
               <option [ngValue]="s.id">{{ s.name }}</option>
             }
           </select>
-        </div>
+        }
       }
-    }
+    </div>
   </header>
 
   @if (error()) {
@@ -73,13 +74,46 @@
     <section class="grid grid-2">
       <article class="panel">
         <header class="panel-head light">
-          <h2><app-icon name="target" [size]="20" /> Competency Progress</h2>
+          <h2><app-icon name="clipboard" [size]="20" /> Assessment Performance</h2>
+          <a class="link" routerLink="/assessments" [queryParams]="{ tab: 'other' }">Records <app-icon name="arrow-right" [size]="16" /></a>
+        </header>
+        <div class="panel-body">
+          @if (scoreRing().length) {
+            <app-ring-chart [segments]="scoreRing()" [center]="pct(d.assessment.average, 0)" caption="Average" ariaLabel="Assessment performance distribution" />
+            <p class="muted small center-text">{{ d.assessment.scores }} scores · pass rate {{ pct(d.assessment.passRate, 0) }} (target {{ d.assessment.masteryTarget }}%)</p>
+          } @else {
+            <p class="empty">No assessment scores yet.</p>
+          }
+        </div>
+      </article>
+      <article class="panel">
+        <header class="panel-head light">
+          <h2><app-icon name="trend" [size]="20" /> Pre-test vs Post-test</h2>
+          <a class="link" routerLink="/assessments">Details <app-icon name="arrow-right" [size]="16" /></a>
+        </header>
+        <div class="panel-body">
+          @let pp = d.prePost.summary;
+          <div class="pp-stats">
+            <div><span>Avg pre-test</span><b>{{ pct(pp.avgPre, 0) }}</b></div>
+            <div><span>Avg post-test</span><b>{{ pct(pp.avgPost, 0) }}</b></div>
+            <div><span>Avg gain</span><b [class.up]="(pp.avgGain ?? 0) > 0">{{ pp.avgGain === null ? '-' : (pp.avgGain > 0 ? '+' : '') + pp.avgGain }}</b></div>
+            <div><span>Improved</span><b>{{ pp.improved }}<small>/{{ pp.completed }}</small></b></div>
+          </div>
+          <app-compare-chart [rows]="prePostRows()" [target]="d.assessment.masteryTarget" />
+        </div>
+      </article>
+    </section>
+
+    <section class="grid grid-2">
+      <article class="panel">
+        <header class="panel-head light">
+          <h2><app-icon name="target" [size]="20" /> Competency Progress{{ d.progressBy === 'competency' ? ' · ' + subject.label() : '' }}</h2>
           <a class="link" routerLink="/competencies">View Details <app-icon name="arrow-right" [size]="16" /></a>
         </header>
         <div class="panel-body">
           <ul class="progress-list">
             @for (a of d.competencyProgress; track a.learningArea; let i = $index) {
-              <li>
+              <li [title]="a.title ?? a.learningArea">
                 <span class="name">{{ a.learningArea }}</span>
                 <div class="progress"><span [class]="'c-' + (i % 6)" [style.width.%]="a.masteryRate ?? 0"></span></div>
                 <b>{{ a.masteryRate === null ? '-' : a.masteryRate.toFixed(0) + '%' }}</b>
@@ -102,7 +136,7 @@
               <span class="badge lg" [class]="LEVEL_TONE[a.level]">{{ LEVEL_LABEL[a.level] }}</span>
               <div class="alert-text">
                 <strong>{{ a.title }}{{ a.learner ? ': ' + a.learner : '' }}</strong>
-                <small>{{ a.action }}</small>
+                <small>{{ a.subject ? a.subject + ' · ' : '' }}{{ a.action }}</small>
               </div>
               <time class="muted small nowrap">{{ fmtDate(a.updatedAt) }}</time>
             </li>

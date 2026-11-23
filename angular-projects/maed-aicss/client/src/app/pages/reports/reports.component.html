@@ -1,17 +1,27 @@
 <div class="page">
   <header class="page-head no-print">
     <h1><app-icon name="chart" [size]="28" /> Reports</h1>
+    <div class="tools">
+      <app-subject-filter />
+    </div>
   </header>
 
-  <section class="cards no-print">
-    @for (r of reports; track r.type) {
-      <button type="button" class="rcard" [class]="r.tone" [class.on]="selected()?.type === r.type" (click)="choose(r)">
-        <span class="ico"><app-icon [name]="r.icon" [size]="30" /></span>
-        <strong>{{ r.title }}</strong>
-        <small>{{ r.sub }}</small>
-      </button>
-    }
-  </section>
+  <p class="muted small no-print scope">Reports use the selected subject: <strong>{{ subject.label() }}</strong>. Export any report to Excel (.xlsx) or PDF (Print → Save as PDF).</p>
+
+  @for (g of groups; track g.group) {
+    <section class="no-print">
+      <h2 class="group-title">{{ g.group }}</h2>
+      <div class="cards">
+        @for (r of g.list; track r.type) {
+          <button type="button" class="rcard" [class]="r.tone" [class.on]="selected()?.type === r.type" (click)="choose(r)">
+            <span class="ico"><app-icon [name]="r.icon" [size]="28" /></span>
+            <strong>{{ r.title }}</strong>
+            <small>{{ r.sub }}</small>
+          </button>
+        }
+      </div>
+    </section>
+  }
 
   @if (selected(); as def) {
     <section class="card options no-print">
@@ -19,7 +29,7 @@
         <label class="field">
           <span>Section</span>
           <select class="input" [(ngModel)]="sectionId">
-            @if (def.type !== 'sf2' && def.type !== 'dtr') {
+            @if (!def.oneSection) {
               <option [ngValue]="null">All sections</option>
             }
             @for (s of sections(); track s.id) {
@@ -27,6 +37,33 @@
             }
           </select>
         </label>
+      }
+      @if (has('range')) {
+        <label class="field">
+          <span>Report period</span>
+          <select class="input" [(ngModel)]="range">
+            <option value="day">Daily</option>
+            <option value="week">Weekly</option>
+            <option value="month">Monthly</option>
+            <option value="year">Whole school year</option>
+          </select>
+        </label>
+        @if (range === 'day' || range === 'week') {
+          <label class="field">
+            <span>{{ range === 'day' ? 'Date' : 'Any day in the week' }}</span>
+            <input class="input" type="date" [(ngModel)]="date" [max]="today" />
+          </label>
+        }
+        @if (range === 'month') {
+          <label class="field">
+            <span>Month</span>
+            <select class="input" [(ngModel)]="month">
+              @for (m of months(); track m) {
+                <option [value]="m">{{ monthLabel(m, true) }}</option>
+              }
+            </select>
+          </label>
+        }
       }
       @if (has('date')) {
         <label class="field">
@@ -38,9 +75,6 @@
         <label class="field">
           <span>Period</span>
           <select class="input" [(ngModel)]="month">
-            @if (has('year')) {
-              <option value="year">Whole school year</option>
-            }
             @for (m of months(); track m) {
               <option [value]="m">{{ monthLabel(m, true) }}</option>
             }
@@ -49,11 +83,11 @@
       }
       @if (has('quarter')) {
         <label class="field">
-          <span>Quarter</span>
+          <span>Term</span>
           <select class="input" [(ngModel)]="quarter">
-            <option [ngValue]="null">All quarters</option>
-            @for (q of [1, 2, 3, 4]; track q) {
-              <option [ngValue]="q">Quarter {{ q }}</option>
+            <option [ngValue]="null">All terms</option>
+            @for (q of TERMS; track q) {
+              <option [ngValue]="q">{{ q | term }}</option>
             }
           </select>
         </label>
@@ -69,8 +103,9 @@
       }
       <div class="row-wrap go">
         <button type="button" class="btn primary" (click)="generate()" [disabled]="loading()"><app-icon name="refresh" [size]="16" /> {{ loading() ? 'Generating…' : 'Generate' }}</button>
-        <button type="button" class="btn" (click)="csv()" [disabled]="!report()"><app-icon name="download" [size]="16" /> CSV / Excel</button>
-        <button type="button" class="btn" (click)="print()" [disabled]="!report()"><app-icon name="printer" [size]="16" /> Print / PDF</button>
+        <button type="button" class="btn" (click)="excel()" [disabled]="!report()"><app-icon name="download" [size]="16" /> Excel</button>
+        <button type="button" class="btn" (click)="print()" [disabled]="!report()" title="Opens the print dialog; choose Save as PDF"><app-icon name="printer" [size]="16" /> PDF / Print</button>
+        <button type="button" class="btn ghost sm" (click)="csv()" [disabled]="!report()">CSV</button>
       </div>
     </section>
 

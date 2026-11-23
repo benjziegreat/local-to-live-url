@@ -127,10 +127,10 @@
                 </select>
               </label>
               <label class="field">
-                <span>Current quarter</span>
+                <span>Current term</span>
                 <select class="input" name="currentQuarter" [(ngModel)]="f.currentQuarter">
-                  @for (q of [1, 2, 3, 4]; track q) {
-                    <option [ngValue]="q">Quarter {{ q }}</option>
+                  @for (q of TERMS; track q) {
+                    <option [ngValue]="q">{{ q | term }}</option>
                   }
                 </select>
               </label>
@@ -158,6 +158,8 @@
                 <label class="field"><span>Late grace period (minutes)</span><input class="input" type="number" min="0" max="60" name="lg" [(ngModel)]="f.lateGraceMinutes" /><small>Time in later than period start + grace → Late.</small></label>
                 <label class="field"><span>Partial days that raise a "missed classes" alert</span><input class="input" type="number" min="1" max="30" name="mc" [(ngModel)]="f.missedClassThreshold" /><small>Days in school but absent from some periods (last 30 school days).</small></label>
                 <label class="field"><span>Reteach when class mastery below (%)</span><input class="input" type="number" min="10" max="100" name="rt" [(ngModel)]="f.reteachThreshold" /><small>Raises a LOW "needs reteaching" alert.</small></label>
+                <label class="field"><span>Low pre-test score (%)</span><input class="input" type="number" min="0" max="100" name="pl" [(ngModel)]="f.pretestLowThreshold" /><small>Pre-test below this → remediation alert until the post-test is given.</small></label>
+                <label class="field"><span>Minimum learning gain (points)</span><input class="input" type="number" min="0" max="100" name="mg" [(ngModel)]="f.minLearningGain" /><small>Post-test % − pre-test % below this (and post-test below mastery) → "limited improvement" alert.</small></label>
               </div>
             </fieldset>
             @if (auth.isAdmin()) {

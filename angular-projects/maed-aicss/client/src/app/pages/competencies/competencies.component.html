@@ -2,6 +2,7 @@
   <header class="page-head">
     <h1><app-icon name="target" [size]="28" /> Competencies</h1>
     <div class="tools">
+      <app-subject-filter />
       @if (data(); as d) {
         @if (d.sections.length > 1) {
           <select class="input" [(ngModel)]="sectionId" (ngModelChange)="load()" aria-label="Section">
@@ -12,10 +13,10 @@
           </select>
         }
       }
-      <select class="input" [(ngModel)]="quarter" (ngModelChange)="load()" aria-label="Quarter">
-        <option [ngValue]="null">All quarters</option>
-        @for (q of [1, 2, 3, 4]; track q) {
-          <option [ngValue]="q">Quarter {{ q }}</option>
+      <select class="input" [(ngModel)]="quarter" (ngModelChange)="load()" aria-label="Term">
+        <option [ngValue]="null">All terms</option>
+        @for (q of TERMS; track q) {
+          <option [ngValue]="q">{{ q | term }}</option>
         }
       </select>
       <button type="button" class="btn primary" (click)="openEdit()"><app-icon name="plus" [size]="16" /> Add Competency</button>
@@ -41,35 +42,53 @@
       </div>
       <div class="kpi-tile compact purple">
         <span class="ico"><app-icon name="chart" [size]="24" /></span>
-        <div><div class="val">{{ pct(d.kpis.targetCoverage, 0) }}</div><div class="lbl">Target Coverage</div></div>
+        <div>
+          <div class="val">{{ d.kpis.completed }}<small class="sub-val">/{{ d.kpis.total }}</small></div>
+          <div class="lbl">Completed · {{ d.kpis.inProgressCount }} in progress · coverage {{ pct(d.kpis.coverage, 0) }}</div>
+        </div>
       </div>
     </section>
 
     <section class="grid grid-side">
       <article class="panel">
         <header class="panel-head light">
-          <h2><app-icon name="trend" /> Competency Progress</h2>
+          <h2><app-icon name="trend" /> {{ subject.selected() ? 'Competency Progress · ' + subject.label() : 'Progress by Subject' }}</h2>
           <span class="muted small">Mastery target {{ d.masteryTarget }}%</span>
         </header>
         <div class="panel-body">
-          <ul class="area-list">
-            @for (a of d.areas; track a.learningArea; let i = $index) {
-              <li [class.focus]="area()?.learningArea === a.learningArea" (click)="focusArea.set(a.learningArea)">
-                <span class="name">{{ a.learningArea }}</span>
-                <div class="progress"><span [class]="'c-' + (i % 6)" [style.width.%]="a.masteryRate ?? 0"></span></div>
-                <b>{{ a.masteryRate === null ? '-' : a.masteryRate.toFixed(0) + '%' }}</b>
-                <span class="badge" [class]="AREA_TONE[a.status]">{{ AREA_LABEL[a.status] }}</span>
-              </li>
-            } @empty {
-              <li class="empty">No competencies yet.</li>
-            }
-          </ul>
+          @if (subject.selected()) {
+            <ul class="area-list">
+              @for (c of d.competencies; track c.id; let i = $index) {
+                <li [title]="c.title">
+                  <span class="name">{{ c.code }}</span>
+                  <div class="progress"><span [class]="'c-' + (i % 6)" [style.width.%]="c.masteryRate ?? 0"></span></div>
+                  <b>{{ c.masteryRate === null ? '-' : c.masteryRate.toFixed(0) + '%' }}</b>
+                  <span class="badge" [class]="COMPLETION_TONE[c.completion]">{{ COMPLETION_LABEL[c.completion] }}</span>
+                </li>
+              } @empty {
+                <li class="empty">No competencies for this subject yet.</li>
+              }
+            </ul>
+          } @else {
+            <ul class="area-list">
+              @for (a of d.areas; track a.learningArea; let i = $index) {
+                <li [class.focus]="area()?.learningArea === a.learningArea" (click)="focusArea.set(a.learningArea)">
+                  <span class="name">{{ a.learningArea }}</span>
+                  <div class="progress"><span [class]="'c-' + (i % 6)" [style.width.%]="a.masteryRate ?? 0"></span></div>
+                  <b>{{ a.masteryRate === null ? '-' : a.masteryRate.toFixed(0) + '%' }}</b>
+                  <span class="badge" [class]="AREA_TONE[a.status]">{{ AREA_LABEL[a.status] }}</span>
+                </li>
+              } @empty {
+                <li class="empty">No competencies yet.</li>
+              }
+            </ul>
+          }
         </div>
       </article>
       <article class="panel">
         <header class="panel-head light">
-          <h2>Competency Details</h2>
-          @if (d.areas.length) {
+          <h2>Mastery Breakdown</h2>
+          @if (d.areas.length > 1) {
             <select class="input" [ngModel]="area()?.learningArea" (ngModelChange)="focusArea.set($event)" aria-label="Learning area">
               @for (a of d.areas; track a.learningArea) {
                 <option [value]="a.learningArea">{{ a.learningArea }}</option>
@@ -81,7 +100,7 @@
           @if (area(); as a) {
             @if (areaRing().length) {
               <app-ring-chart [segments]="areaRing()" [center]="pct(a.masteryRate, 0)" caption="Mastered" [ariaLabel]="a.learningArea + ' mastery'" />
-              <p class="muted small center">{{ a.competencies }} competencies · {{ a.assessed }} learner results</p>
+              <p class="muted small center">{{ a.learningArea }} · {{ a.competencies }} competencies · {{ a.assessed }} learner results</p>
             } @else {
               <p class="empty">No assessment results for {{ a.learningArea }} yet.</p>
             }
@@ -92,13 +111,23 @@
 
     <article class="panel">
       <header class="panel-head">
-        <h2><app-icon name="list" /> Competency List &amp; Learning Gaps</h2>
-        <select class="input" [ngModel]="areaFilter()" (ngModelChange)="areaFilter.set($event)" aria-label="Filter learning area">
-          <option value="">All learning areas</option>
-          @for (a of learningAreas(); track a) {
-            <option [value]="a">{{ a }}</option>
+        <h2><app-icon name="list" /> Competencies by Term &amp; Learning Period</h2>
+        <span class="row-wrap">
+          @if (!subject.selected() && learningAreas().length > 1) {
+            <select class="input" [ngModel]="areaFilter()" (ngModelChange)="areaFilter.set($event)" aria-label="Filter subject">
+              <option value="">All subjects</option>
+              @for (a of learningAreas(); track a) {
+                <option [value]="a">{{ a }}</option>
+              }
+            </select>
           }
-        </select>
+          <select class="input" [ngModel]="completionFilter()" (ngModelChange)="completionFilter.set($event)" aria-label="Filter completion">
+            <option value="">Any status</option>
+            <option value="COMPLETED">Completed</option>
+            <option value="IN_PROGRESS">In progress</option>
+            <option value="NOT_STARTED">Not started</option>
+          </select>
+        </span>
       </header>
       <div class="table-wrap">
         <table class="table stacked">
@@ -106,77 +135,147 @@
             <tr>
               <th>Code</th>
               <th>Competency</th>
-              <th>Qtr</th>
-              <th class="num">Assessments</th>
+              <th>Coverage</th>
+              <th>Pre → Post</th>
               <th>Mastery</th>
-              <th>Gaps</th>
               <th>Status</th>
               <th></th>
             </tr>
           </thead>
-          <tbody>
-            @for (c of list(); track c.id) {
-              <tr [class.inactive]="!c.active">
-                <td data-label="Code"><strong class="nowrap">{{ c.code }}</strong><br /><span class="muted small">{{ c.learningArea }}</span></td>
-                <td data-label="Competency" class="title">{{ c.title }}@if (!c.active) {<span class="badge">Inactive</span>}</td>
-                <td data-label="Quarter">Q{{ c.quarter }}</td>
-                <td data-label="Assessments" class="num">{{ c.assessments }}</td>
-                <td data-label="Mastery" class="mastery">
-                  <div class="progress thin"><span [style.width.%]="c.masteryRate ?? 0"></span></div>
-                  <span>{{ pct(c.masteryRate, 0) }}</span>
-                </td>
-                <td data-label="Gaps" class="nowrap">
-                  @if (c.assessed) {
-                    <span class="muted small">{{ c.inProgress }} in progress · <b class="crit">{{ c.needsSupport }}</b> need support</span>
-                  } @else {
-                    <span class="muted small">Not assessed</span>
-                  }
-                </td>
-                <td data-label="Status"><span class="badge" [class]="AREA_TONE[status(c)]">{{ AREA_LABEL[status(c)] }}</span></td>
-                <td class="actions">
-                  <button type="button" class="btn sm" (click)="openDetail(c)" [disabled]="!c.assessed"><app-icon name="eye" [size]="15" /> Learners</button>
-                  <button type="button" class="btn sm icon-only" (click)="openEdit(c)" aria-label="Edit"><app-icon name="edit" [size]="15" /></button>
-                  @if (auth.isAdmin()) {
-                    <button type="button" class="btn sm icon-only" (click)="remove(c)" aria-label="Delete"><app-icon name="trash" [size]="15" /></button>
-                  }
-                </td>
-              </tr>
-            } @empty {
-              <tr><td colspan="8" class="empty">No competencies match.</td></tr>
-            }
-          </tbody>
+          @for (g of groups(); track g.quarter) {
+            <tbody>
+              <tr class="group-row"><th colspan="7">{{ g.quarter | term }}</th></tr>
+              @for (p of g.periods; track p.period) {
+                <tr class="period-row"><td colspan="7">{{ p.period }}</td></tr>
+                @for (c of p.list; track c.id) {
+                  <tr [class.inactive]="!c.active">
+                    <td data-label="Code"><strong class="nowrap">{{ c.code }}</strong><br /><span class="muted small">{{ c.subject }}</span></td>
+                    <td data-label="Competency" class="title">{{ c.title }}@if (!c.active) {<span class="badge">Inactive</span>}</td>
+                    <td data-label="Coverage" class="nowrap small">
+                      {{ c.lessons }} lesson(s)@if (c.lastLesson) {<span class="muted"> · last {{ fmtDate(c.lastLesson) }}</span>}<br />
+                      <span class="muted">{{ c.assessments }} assessment(s) · {{ c.prePost.tests }} pre/post</span>
+                    </td>
+                    <td data-label="Pre → Post" class="nowrap">
+                      @if (c.prePost.tests) {
+                        <span>{{ pct(c.prePost.avgPre, 0) }} → {{ pct(c.prePost.avgPost, 0) }}</span><br />
+                        <span class="small" [class.up]="(c.prePost.avgGain ?? 0) > 0" [class.down]="(c.prePost.avgGain ?? 0) < 0">gain {{ signed(c.prePost.avgGain) }}</span>
+                      } @else {
+                        <span class="muted small">No tests yet</span>
+                      }
+                    </td>
+                    <td data-label="Mastery" class="mastery">
+                      <div class="progress thin"><span [style.width.%]="c.masteryRate ?? 0"></span></div>
+                      <span class="m-pct">{{ pct(c.masteryRate, 0) }}</span>
+                      @if (c.assessed) {
+                        <span class="gaps muted small nowrap"><b class="crit">{{ c.needsSupport }}</b> need support</span>
+                      }
+                    </td>
+                    <td data-label="Status">
+                      <span class="badge" [class]="COMPLETION_TONE[c.completion]">{{ COMPLETION_LABEL[c.completion] }}</span>
+                      @if (c.sections) {
+                        <br /><span class="muted small">{{ c.completedSections }}/{{ c.sections }} section(s)</span>
+                      }
+                      @if (c.masteryRate !== null) {
+                        <br /><span class="badge" [class]="AREA_TONE[status(c)]">{{ AREA_LABEL[status(c)] }}</span>
+                      }
+                    </td>
+                    <td class="actions">
+                      <button type="button" class="btn sm" (click)="openDetail(c)" [disabled]="!c.assessed && !c.prePost.tests && !c.lessons"><app-icon name="eye" [size]="15" /> Details</button>
+                      <button type="button" class="btn sm icon-only" (click)="openEdit(c)" aria-label="Edit"><app-icon name="edit" [size]="15" /></button>
+                      @if (auth.isAdmin()) {
+                        <button type="button" class="btn sm icon-only" (click)="remove(c)" aria-label="Delete"><app-icon name="trash" [size]="15" /></button>
+                      }
+                    </td>
+                  </tr>
+                }
+              }
+            </tbody>
+          } @empty {
+            <tbody><tr><td colspan="7" class="empty">No competencies match.</td></tr></tbody>
+          }
         </table>
       </div>
+      <p class="muted small legend-note">
+        <strong>Completed</strong> = post-test recorded in every section taking the subject · <strong>In progress</strong> = lessons logged, pre-test given or assessments recorded ·
+        Lessons are logged from attendance (competency taught per class period).
+      </p>
     </article>
   } @else {
     <div class="skeleton" style="min-height: 400px"></div>
   }
 </div>
 
-<app-modal [open]="detailOpen()" [title]="detail() ? detail()!.competency.code + ': learner mastery' : 'Loading…'" [width]="760" (closed)="detailOpen.set(false)">
+<app-modal [open]="detailOpen()" [title]="detail() ? detail()!.competency.code + ': records' : 'Loading…'" [width]="860" (closed)="detailOpen.set(false)">
   @if (detail(); as d) {
-    <p class="lead">{{ d.competency.title }} <span class="muted">({{ d.competency.learningArea }}, Q{{ d.competency.quarter }})</span></p>
+    <p class="lead">{{ d.competency.title }} <span class="muted">({{ d.competency.subject }}, {{ d.competency.quarter | term }}{{ d.competency.learningPeriod ? ', ' + d.competency.learningPeriod : '' }})</span></p>
+
+    <h3 class="sub">Pre-test &amp; post-test by section</h3>
     <div class="table-wrap">
       <table class="table">
-        <thead><tr><th>Learner</th><th>Section</th><th class="num">Average</th><th>Mastery</th></tr></thead>
+        <thead><tr><th>Section</th><th class="num">Avg pre</th><th class="num">Avg post</th><th class="num">Gain</th><th class="num">Improved</th><th class="num">Mastered</th></tr></thead>
+        <tbody>
+          @for (t of d.prePost; track t.id) {
+            <tr>
+              <td>{{ t.section }}</td>
+              <td class="num">{{ pct(t.avgPre, 0) }}</td>
+              <td class="num">{{ t.postTaken ? pct(t.avgPostCompleted ?? t.avgPost, 0) : 'Pending' }}</td>
+              <td class="num"><strong>{{ signed(t.avgGain) }}</strong></td>
+              <td class="num">{{ t.improved }}/{{ t.completed }}</td>
+              <td class="num">{{ t.postTaken ? t.masteredPost + '/' + t.postTaken : '-' }}</td>
+            </tr>
+          } @empty {
+            <tr><td colspan="6" class="empty">No pre-test or post-test yet.</td></tr>
+          }
+        </tbody>
+      </table>
+    </div>
+
+    <h3 class="sub">Learners</h3>
+    <div class="table-wrap">
+      <table class="table">
+        <thead><tr><th>Learner</th><th>Section</th><th class="num">Pre</th><th class="num">Post</th><th class="num">Gain</th><th class="num">Average</th><th>Mastery</th></tr></thead>
         <tbody>
           @for (l of d.learners; track l.id) {
             <tr>
               <td><a [routerLink]="['/learners', l.id]">{{ l.name }}</a><br /><span class="muted small">{{ l.learnerNo }}</span></td>
               <td>{{ l.section }}</td>
+              <td class="num">{{ pct(l.prePct, 0) }}</td>
+              <td class="num">{{ pct(l.postPct, 0) }}</td>
+              <td class="num">{{ signed(l.gain) }}</td>
               <td class="num">{{ pct(l.average) }}</td>
-              <td><span class="badge" [class]="BAND_TONE[l.band]">{{ BAND_LABEL[l.band] }}</span></td>
+              <td>
+                @if (l.band) {
+                  <span class="badge" [class]="BAND_TONE[l.band]">{{ BAND_LABEL[l.band] }}</span>
+                }
+              </td>
             </tr>
           }
         </tbody>
       </table>
     </div>
-    <h3 class="sub">Assessments</h3>
-    <ul class="mini">
-      @for (a of d.assessments; track a.id) {
-        <li>{{ fmtDate(a.date) }} · {{ a.title }} · {{ TYPE_LABEL[a.type] }} · {{ a.section }} · /{{ a.maxScore }}</li>
-      }
-    </ul>
+
+    <div class="grid grid-2 detail-foot">
+      <div>
+        <h3 class="sub">Lessons logged</h3>
+        <ul class="mini">
+          @for (l of d.lessons; track l.section) {
+            <li>{{ l.section }} · {{ l.lessons }} class meeting(s){{ l.last ? ' · last ' + fmtDate(l.last) : '' }}</li>
+          } @empty {
+            <li class="muted">No lessons logged for this competency.</li>
+          }
+        </ul>
+      </div>
+      <div>
+        <h3 class="sub">Assessments</h3>
+        <ul class="mini">
+          @for (a of d.assessments; track a.id) {
+            <li>{{ fmtDate(a.date) }} · {{ a.title }} · {{ TYPE_LABEL[a.type] }} · {{ a.section }} · /{{ a.maxScore }}</li>
+          } @empty {
+            <li class="muted">No assessments recorded.</li>
+          }
+        </ul>
+      </div>
+    </div>
   } @else {
     <div class="skeleton"></div>
   }
@@ -184,26 +283,30 @@
 
 <app-modal [open]="editOpen()" [title]="editingId ? 'Edit Competency' : 'Add Competency'" (closed)="editOpen.set(false)">
   <form class="form-grid" (ngSubmit)="save()">
-    <label class="field">
-      <span>Code</span>
-      <input class="input" name="code" [(ngModel)]="form.code" required placeholder="e.g. OC-Q3-01" />
+    <label class="field full">
+      <span>Subject</span>
+      <select class="input" name="subjectId" [(ngModel)]="form.subjectId" required>
+        <option [ngValue]="null" disabled>Choose a subject…</option>
+        @for (s of subject.subjects(); track s.id) {
+          <option [ngValue]="s.id">{{ s.name }}</option>
+        }
+      </select>
     </label>
     <label class="field">
-      <span>Quarter</span>
+      <span>Code</span>
+      <input class="input" name="code" [(ngModel)]="form.code" required placeholder="e.g. GM-Q3-01" />
+    </label>
+    <label class="field">
+      <span>Term</span>
       <select class="input" name="quarter" [(ngModel)]="form.quarter">
-        @for (q of [1, 2, 3, 4]; track q) {
-          <option [ngValue]="q">Quarter {{ q }}</option>
+        @for (q of TERMS; track q) {
+          <option [ngValue]="q">{{ q | term }}</option>
         }
       </select>
     </label>
     <label class="field full">
-      <span>Learning area</span>
-      <input class="input" name="learningArea" [(ngModel)]="form.learningArea" required list="areas" placeholder="e.g. Oral Communication" />
-      <datalist id="areas">
-        @for (a of learningAreas(); track a) {
-          <option [value]="a"></option>
-        }
-      </datalist>
+      <span>Learning period <span class="muted">(optional)</span></span>
+      <input class="input" name="learningPeriod" [(ngModel)]="form.learningPeriod" maxlength="60" placeholder="e.g. Weeks 1–2" />
     </label>
     <label class="field full">
       <span>Competency (learning competency statement)</span>
@@ -215,7 +318,7 @@
     </label>
     <div class="full row" style="justify-content: flex-end">
       <button type="button" class="btn" (click)="editOpen.set(false)">Cancel</button>
-      <button type="submit" class="btn primary" [disabled]="saving()">{{ saving() ? 'Saving…' : 'Save' }}</button>
+      <button type="submit" class="btn primary" [disabled]="saving() || !form.subjectId">{{ saving() ? 'Saving…' : 'Save' }}</button>
     </div>
   </form>
 </app-modal>

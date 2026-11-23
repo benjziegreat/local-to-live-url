@@ -2,116 +2,362 @@
   <header class="page-head">
     <h1><app-icon name="clipboard" [size]="28" /> Assessment Records</h1>
     <div class="tools">
-      @if (data(); as d) {
-        <select class="input" [(ngModel)]="learningArea" (ngModelChange)="load()" aria-label="Learning area">
-          <option value="">All Competencies</option>
-          @for (a of d.learningAreas; track a) {
-            <option [value]="a">{{ a }}</option>
+      <app-subject-filter />
+      @if (sectionOptions().length > 1) {
+        <select class="input" [(ngModel)]="sectionId" (ngModelChange)="load()" aria-label="Section">
+          <option [ngValue]="null">All sections</option>
+          @for (s of sectionOptions(); track s.id) {
+            <option [ngValue]="s.id">{{ s.name }}</option>
           }
         </select>
-        @if (d.sections.length > 1) {
-          <select class="input" [(ngModel)]="sectionId" (ngModelChange)="load()" aria-label="Section">
-            <option [ngValue]="null">All sections</option>
-            @for (s of d.sections; track s.id) {
-              <option [ngValue]="s.id">{{ s.name }}</option>
-            }
-          </select>
-        }
       }
-      <select class="input" [(ngModel)]="quarter" (ngModelChange)="load()" aria-label="Quarter">
-        <option [ngValue]="null">All quarters</option>
-        @for (q of [1, 2, 3, 4]; track q) {
-          <option [ngValue]="q">Quarter {{ q }}</option>
+      <select class="input" [(ngModel)]="competencyId" (ngModelChange)="load()" aria-label="Competency">
+        <option [ngValue]="null">All competencies</option>
+        @for (c of competencyOptions(); track c.id) {
+          <option [ngValue]="c.id">{{ c.code }}{{ subject.selectedId() ? '' : ' · ' + c.learningArea }}</option>
         }
       </select>
-      <button type="button" class="btn" (click)="export()"><app-icon name="download" [size]="16" /> Export</button>
-      <button type="button" class="btn primary" (click)="openNew()" [disabled]="!data()?.sections?.length"><app-icon name="plus" [size]="16" /> New Assessment</button>
+      <select class="input" [(ngModel)]="quarter" (ngModelChange)="load()" aria-label="Term">
+        <option [ngValue]="null">All terms</option>
+        @for (q of TERMS; track q) {
+          <option [ngValue]="q">{{ q | term }}</option>
+        }
+      </select>
     </div>
   </header>
 
-  @if (error()) {
-    <div class="card empty">{{ error() }}</div>
-  } @else if (data()) {
-    @let d = data()!;
-    <section class="grid grid-side">
-      <article class="panel">
-        <header class="panel-head light"><h2>Assessment Summary</h2></header>
-        <div class="panel-body summary">
-          <div class="kpi-tile compact">
-            <span class="ico"><app-icon name="check-circle" [size]="24" /></span>
-            <div><div class="val">{{ pct(d.summary.average, 0) }}</div><div class="lbl">Overall Average</div></div>
+  <nav class="tabs" role="tablist" aria-label="Assessment type">
+    <button type="button" role="tab" [class.on]="tab() === 'prepost'" [attr.aria-selected]="tab() === 'prepost'" (click)="setTab('prepost')">
+      <app-icon name="trend" [size]="16" /> Pre-test &amp; Post-test
+    </button>
+    <button type="button" role="tab" [class.on]="tab() === 'other'" [attr.aria-selected]="tab() === 'other'" (click)="setTab('other')">
+      <app-icon name="list" [size]="16" /> Quizzes, Tasks &amp; Exams
+    </button>
+  </nav>
+
+  @if (tab() === 'prepost') {
+    <!-- ================= Pre-test / post-test ================= -->
+    <div class="row-wrap bar">
+      <select class="input" [(ngModel)]="phase" (ngModelChange)="loadPrePost()" aria-label="Assessment period">
+        <option value="">All records</option>
+        <option value="pending">Pre-test done, awaiting post-test</option>
+        <option value="complete">Completed (pre-test and post-test)</option>
+      </select>
+      <span class="spacer"></span>
+      <button type="button" class="btn" (click)="exportPrePost()" [disabled]="!pp()?.records?.length"><app-icon name="download" [size]="16" /> Excel</button>
+      <button type="button" class="btn primary" (click)="openSheet()" [disabled]="!sectionOptions().length"><app-icon name="plus" [size]="16" /> Encode Pre/Post-test</button>
+    </div>
+
+    @if (ppError()) {
+      <div class="card empty">{{ ppError() }}</div>
+    } @else if (pp()) {
+      @let d = pp()!;
+      <section class="grid grid-4">
+        <div class="kpi-tile compact orange">
+          <span class="ico"><app-icon name="clipboard" [size]="24" /></span>
+          <div><div class="val">{{ pct(d.summary.avgPre, 0) }}</div><div class="lbl">Average pre-test · {{ d.summary.preTaken }} taken</div></div>
+        </div>
+        <div class="kpi-tile compact">
+          <span class="ico"><app-icon name="check-circle" [size]="24" /></span>
+          <div><div class="val">{{ pct(d.summary.avgPost, 0) }}</div><div class="lbl">Average post-test · {{ d.summary.postTaken }} taken</div></div>
+        </div>
+        <div class="kpi-tile compact green">
+          <span class="ico"><app-icon name="trend" [size]="24" /></span>
+          <div><div class="val">{{ signed(d.summary.avgGain) }}</div><div class="lbl">Average learning gain (points)</div></div>
+        </div>
+        <div class="kpi-tile compact purple">
+          <span class="ico"><app-icon name="hourglass" [size]="24" /></span>
+          <div><div class="val">{{ d.summary.pending }}</div><div class="lbl">Awaiting post-test · {{ d.summary.tests }} class test(s)</div></div>
+        </div>
+      </section>
+
+      <section class="grid grid-main">
+        <article class="panel">
+          <header class="panel-head light">
+            <h2><app-icon name="chart" /> Pre-test vs Post-test by Competency</h2>
+            <span class="muted small">Learners with both scores</span>
+          </header>
+          <div class="panel-body"><app-compare-chart [rows]="compareRows()" [target]="d.masteryTarget" /></div>
+        </article>
+        <article class="panel">
+          <header class="panel-head light"><h2><app-icon name="target" /> Change After Instruction</h2></header>
+          <div class="panel-body center-body">
+            @if (changeRing().length) {
+              <app-ring-chart [segments]="changeRing()" [center]="d.summary.improved + '/' + d.summary.completed" caption="Improved" ariaLabel="Improved, maintained and declined" />
+              <p class="muted small center">
+                {{ d.summary.masteredPost }} of {{ d.summary.postTaken }} post-tests at or above {{ d.masteryTarget }}% ·
+                {{ d.summary.limitedGain }} learner(s) gained less than {{ d.minLearningGain }} points and are below target
+              </p>
+            } @else {
+              <p class="empty">No completed pre-test/post-test pairs yet.</p>
+            }
           </div>
-          <div class="kpi-tile compact green">
-            <span class="ico"><app-icon name="trend" [size]="24" /></span>
-            <div>
-              <div class="val">{{ d.summary.delta === null ? pct(d.summary.passRate, 0) : (d.summary.delta >= 0 ? '+' : '') + d.summary.delta + '%' }}</div>
-              <div class="lbl">{{ d.summary.delta === null ? 'Pass Rate' : 'vs. Previous Quarter' }}</div>
+        </article>
+      </section>
+
+      <article class="panel">
+        <header class="panel-head">
+          <h2><app-icon name="users" /> Class Summaries</h2>
+          <span class="small">{{ d.tests.length }} class test(s)</span>
+        </header>
+        <div class="table-wrap">
+          <table class="table stacked">
+            <thead>
+              <tr>
+                <th>Competency</th><th>Section</th><th class="num">Pre-test</th><th class="num">Post-test</th><th class="num">Gain</th>
+                <th>Improved · Maintained · Declined</th><th class="num">Mastered</th><th></th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (t of d.tests; track t.id) {
+                <tr>
+                  <td data-label="Competency"><strong>{{ t.competencyCode }}</strong> <span class="muted small">{{ t.quarter | term }}</span><br /><span class="muted small clamp">{{ t.competencyTitle }}</span></td>
+                  <td data-label="Section">{{ t.section }}@if (!subject.selectedId()) {<br /><span class="muted small">{{ t.subject }}</span>}</td>
+                  <td data-label="Pre-test" class="num">{{ pct(t.avgPre, 0) }}<br /><span class="muted small">{{ t.preTaken }} · /{{ t.preTotal }}</span></td>
+                  <td data-label="Post-test" class="num">
+                    @if (t.postTaken) {
+                      {{ pct(t.avgPost, 0) }}<br /><span class="muted small">{{ t.postTaken }} · /{{ t.postTotal }}</span>
+                    } @else {
+                      <span class="badge">Pending</span>
+                    }
+                  </td>
+                  <td data-label="Gain" class="num"><strong [class.up]="(t.avgGain ?? 0) >= d.minLearningGain" [class.down]="t.avgGain !== null && t.avgGain < d.minLearningGain">{{ signed(t.avgGain) }}</strong></td>
+                  <td data-label="Change" class="nowrap">
+                    <span class="badge success">{{ t.improved }}</span> <span class="badge warning">{{ t.maintained }}</span> <span class="badge critical">{{ t.declined }}</span>
+                  </td>
+                  <td data-label="Mastered" class="num">{{ t.postTaken ? t.masteredPost + '/' + t.postTaken : '-' }}</td>
+                  <td class="actions">
+                    <button type="button" class="btn sm" (click)="openSheet(t)"><app-icon name="edit" [size]="15" /> {{ t.postTaken ? 'Scores' : 'Post-test' }}</button>
+                    <button type="button" class="btn sm icon-only" (click)="removeTest(t)" aria-label="Delete"><app-icon name="trash" [size]="15" /></button>
+                  </td>
+                </tr>
+              } @empty {
+                <tr><td colspan="8" class="empty">No pre-tests recorded for these filters. Use “Encode Pre/Post-test” to start.</td></tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="panel">
+        <header class="panel-head">
+          <h2><app-icon name="list" /> Learner Records</h2>
+          <input class="input sm-search" type="search" placeholder="Search learner or competency…" [ngModel]="recordQuery()" (ngModelChange)="recordQuery.set($event); shown.set(150)" aria-label="Search records" />
+        </header>
+        <div class="table-wrap">
+          <table class="table stacked records">
+            <thead>
+              <tr>
+                <th>Learner</th><th>Competency</th><th class="num">Pre-test</th><th class="num">Pre %</th><th class="num">Post-test</th>
+                <th class="num">Post %</th><th class="num">Gain</th><th>Interpretation</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (r of visibleRecords(); track r.testId + '-' + r.learnerId) {
+                <tr>
+                  <td data-label="Learner"><a [routerLink]="['/learners', r.learnerId]"><strong>{{ r.learner }}</strong></a><br /><span class="muted small">{{ r.section }}{{ subject.selectedId() ? '' : ' · ' + r.subject }}</span></td>
+                  <td data-label="Competency"><strong class="nowrap">{{ r.competencyCode }}</strong> <span class="muted small">{{ r.quarter | term }}</span><br /><span class="muted small clamp">{{ r.competencyTitle }}</span></td>
+                  <td data-label="Pre-test" class="num nowrap">{{ r.preScore === null ? '-' : r.preScore + ' / ' + r.preTotal }}</td>
+                  <td data-label="Pre %" class="num">{{ pct(r.prePct, 0) }}</td>
+                  <td data-label="Post-test" class="num nowrap">{{ r.postScore === null ? '-' : r.postScore + ' / ' + r.postTotal }}</td>
+                  <td data-label="Post %" class="num"><strong [class.down]="r.postPct !== null && r.postPct < d.masteryTarget">{{ pct(r.postPct, 0) }}</strong></td>
+                  <td data-label="Gain" class="num"><strong [class.up]="(r.gain ?? 0) > 0" [class.down]="(r.gain ?? 0) < 0">{{ signed(r.gain) }}</strong></td>
+                  <td data-label="Interpretation">
+                    <span class="badge" [class]="CHANGE_TONE[r.change]">{{ CHANGE_LABEL[r.change] }}</span>
+                    <br /><span class="muted small">{{ r.performance }}</span>
+                  </td>
+                </tr>
+              } @empty {
+                <tr><td colspan="8" class="empty">No learner records for these filters.</td></tr>
+              }
+            </tbody>
+          </table>
+        </div>
+        @if (records().length > visibleRecords().length) {
+          <footer class="more">
+            <span class="muted small">Showing {{ visibleRecords().length }} of {{ records().length }}</span>
+            <button type="button" class="btn sm" (click)="shown.set(shown() + 300)">Show more</button>
+          </footer>
+        }
+        <p class="muted small legend-note">
+          Pre % = pre-test score ÷ total items × 100 · Post % = post-test score ÷ total items × 100 · Gain = Post % − Pre % (percentage points) ·
+          Mastery target {{ d.masteryTarget }}%.
+        </p>
+      </article>
+    } @else {
+      <div class="skeleton" style="min-height: 400px"></div>
+    }
+  } @else {
+    <!-- ================= Quizzes, performance tasks, exams ================= -->
+    <div class="row-wrap bar">
+      <span class="spacer"></span>
+      <button type="button" class="btn" (click)="export()"><app-icon name="download" [size]="16" /> Excel</button>
+      <button type="button" class="btn primary" (click)="openNew()" [disabled]="!data()?.sections?.length"><app-icon name="plus" [size]="16" /> New Assessment</button>
+    </div>
+
+    @if (error()) {
+      <div class="card empty">{{ error() }}</div>
+    } @else if (data()) {
+      @let d = data()!;
+      <section class="grid grid-side">
+        <article class="panel">
+          <header class="panel-head light"><h2>Assessment Summary</h2></header>
+          <div class="panel-body summary">
+            <div class="kpi-tile compact">
+              <span class="ico"><app-icon name="check-circle" [size]="24" /></span>
+              <div><div class="val">{{ pct(d.summary.average, 0) }}</div><div class="lbl">Overall Average</div></div>
+            </div>
+            <div class="kpi-tile compact green">
+              <span class="ico"><app-icon name="trend" [size]="24" /></span>
+              <div>
+                <div class="val">{{ d.summary.delta === null ? pct(d.summary.passRate, 0) : (d.summary.delta >= 0 ? '+' : '') + d.summary.delta + '%' }}</div>
+                <div class="lbl">{{ d.summary.delta === null ? 'Pass Rate' : 'vs. Previous Term' }}</div>
+              </div>
+            </div>
+            <div class="kpi-tile compact purple">
+              <span class="ico"><app-icon name="trophy" [size]="24" /></span>
+              <div><div class="val">{{ d.summary.assessments }}</div><div class="lbl">Assessments · {{ d.summary.scores }} scores</div></div>
             </div>
           </div>
-          <div class="kpi-tile compact purple">
-            <span class="ico"><app-icon name="trophy" [size]="24" /></span>
-            <div><div class="val">{{ d.summary.assessments }}</div><div class="lbl">Assessments · {{ d.summary.scores }} scores</div></div>
-          </div>
-        </div>
-      </article>
-      <article class="panel">
-        <header class="panel-head light"><h2>Performance Distribution</h2></header>
-        <div class="panel-body">
-          @if (distribution().length) {
-            <app-ring-chart [segments]="distribution()" [center]="pct(d.summary.average, 0)" caption="Average" ariaLabel="Performance distribution" />
-          } @else {
-            <p class="empty">No scores yet.</p>
-          }
-        </div>
-      </article>
-    </section>
-
-    <article class="panel">
-      <header class="panel-head">
-        <h2><app-icon name="list" /> Assessment Entries</h2>
-        <span class="small">{{ d.assessments.length }} records</span>
-      </header>
-      <div class="table-wrap">
-        <table class="table stacked">
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Assessment</th>
-              <th>Competency</th>
-              <th>Section</th>
-              <th class="num">Average</th>
-              <th class="num">Passed</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            @for (a of d.assessments; track a.id) {
-              <tr>
-                <td data-label="Date" class="nowrap">{{ fmtDate(a.date) }}</td>
-                <td data-label="Assessment"><strong>{{ a.title }}</strong><br /><span class="muted small">{{ TYPE_LABEL[a.type] }} · /{{ a.maxScore }}{{ a.createdBy ? ' · ' + a.createdBy : '' }}</span></td>
-                <td data-label="Competency"><span class="nowrap">{{ a.competency }}</span><br /><span class="muted small">{{ a.learningArea }}</span></td>
-                <td data-label="Section">{{ a.section }}</td>
-                <td data-label="Average" class="num">
-                  <span class="score" [class.low]="a.average !== null && a.average < d.masteryTarget">{{ pct(a.average, 0) }}</span>
-                </td>
-                <td data-label="Passed" class="num">{{ a.passed }}/{{ a.scored }}</td>
-                <td class="actions">
-                  <button type="button" class="btn sm" (click)="openEdit(a)"><app-icon name="edit" [size]="15" /> Scores</button>
-                  <button type="button" class="btn sm icon-only" (click)="remove(a)" aria-label="Delete"><app-icon name="trash" [size]="15" /></button>
-                </td>
-              </tr>
-            } @empty {
-              <tr><td colspan="7" class="empty">No assessments recorded for these filters.</td></tr>
+        </article>
+        <article class="panel">
+          <header class="panel-head light"><h2>Performance Distribution</h2></header>
+          <div class="panel-body">
+            @if (distribution().length) {
+              <app-ring-chart [segments]="distribution()" [center]="pct(d.summary.average, 0)" caption="Average" ariaLabel="Performance distribution" />
+            } @else {
+              <p class="empty">No scores yet.</p>
             }
-          </tbody>
-        </table>
-      </div>
-    </article>
-  } @else {
-    <div class="skeleton" style="min-height: 400px"></div>
+          </div>
+        </article>
+      </section>
+
+      <article class="panel">
+        <header class="panel-head">
+          <h2><app-icon name="list" /> Assessment Entries</h2>
+          <span class="small">{{ d.assessments.length }} records</span>
+        </header>
+        <div class="table-wrap">
+          <table class="table stacked">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Assessment</th>
+                <th>Competency</th>
+                <th>Section</th>
+                <th class="num">Average</th>
+                <th class="num">Passed</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (a of d.assessments; track a.id) {
+                <tr>
+                  <td data-label="Date" class="nowrap">{{ fmtDate(a.date) }}</td>
+                  <td data-label="Assessment"><strong>{{ a.title }}</strong><br /><span class="muted small">{{ TYPE_LABEL[a.type] }} · /{{ a.maxScore }}{{ a.createdBy ? ' · ' + a.createdBy : '' }}</span></td>
+                  <td data-label="Competency"><span class="nowrap">{{ a.competency }}</span><br /><span class="muted small">{{ a.learningArea }}</span></td>
+                  <td data-label="Section">{{ a.section }}</td>
+                  <td data-label="Average" class="num">
+                    <span class="score" [class.low]="a.average !== null && a.average < d.masteryTarget">{{ pct(a.average, 0) }}</span>
+                  </td>
+                  <td data-label="Passed" class="num">{{ a.passed }}/{{ a.scored }}</td>
+                  <td class="actions">
+                    <button type="button" class="btn sm" (click)="openEdit(a)"><app-icon name="edit" [size]="15" /> Scores</button>
+                    <button type="button" class="btn sm icon-only" (click)="remove(a)" aria-label="Delete"><app-icon name="trash" [size]="15" /></button>
+                  </td>
+                </tr>
+              } @empty {
+                <tr><td colspan="7" class="empty">No assessments recorded for these filters.</td></tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      </article>
+    } @else {
+      <div class="skeleton" style="min-height: 400px"></div>
+    }
   }
 </div>
 
+<!-- Pre-test / post-test encoding sheet -->
+<app-modal [open]="sheetOpen()" title="Competency Pre-test and Post-test" [width]="900" (closed)="sheetOpen.set(false)">
+  <div class="form-grid">
+    <label class="field">
+      <span>Section</span>
+      <select class="input" [(ngModel)]="sheetSectionId" (ngModelChange)="loadSheet()">
+        @for (s of sectionOptions(); track s.id) {
+          <option [ngValue]="s.id">{{ s.name }}</option>
+        }
+      </select>
+    </label>
+    <label class="field">
+      <span>Competency</span>
+      <select class="input" [(ngModel)]="sheetCompetencyId" (ngModelChange)="loadSheet()">
+        <option [ngValue]="null" disabled>Choose…</option>
+        @for (c of competencyOptions(); track c.id) {
+          <option [ngValue]="c.id">{{ c.quarter | term }} · {{ c.code }}{{ subject.selectedId() ? '' : ' · ' + c.learningArea }}</option>
+        }
+      </select>
+    </label>
+  </div>
+
+  @if (sheetLoading()) {
+    <div class="skeleton" style="min-height: 200px; margin-top: 14px"></div>
+  } @else if (sheet()) {
+    @let s = sheet()!;
+    <p class="lead small"><strong>{{ s.competency.code }}</strong> · {{ s.competency.title }} <span class="muted">({{ s.competency.subject }}, {{ s.competency.quarter | term }})</span></p>
+    @if (!s.test) {
+      <p class="note small"><app-icon name="info" [size]="15" /> New test. Encode the pre-test now (before instruction); come back after the lesson or intervention to add the post-test.</p>
+    }
+    <div class="totals">
+      <fieldset>
+        <legend>Pre-test</legend>
+        <label class="field"><span>Total items</span><input class="input" type="number" min="1" max="1000" [(ngModel)]="preTotal" /></label>
+        <label class="field"><span>Date given</span><input class="input" type="date" [(ngModel)]="preDate" /></label>
+      </fieldset>
+      <fieldset>
+        <legend>Post-test</legend>
+        <label class="field"><span>Total items</span><input class="input" type="number" min="1" max="1000" [(ngModel)]="postTotal" /></label>
+        <label class="field"><span>Date given</span><input class="input" type="date" [(ngModel)]="postDate" /></label>
+      </fieldset>
+    </div>
+    <h3 class="sub">Scores <span class="muted small">({{ sheetStats().pre }} pre-test · {{ sheetStats().post }} post-test of {{ sheetStats().total }} learners; leave blank if not taken)</span></h3>
+    <div class="sheet-wrap">
+      <table class="table sheet">
+        <thead>
+          <tr><th>#</th><th>Learner</th><th class="num">Pre-test</th><th class="num">Pre %</th><th class="num">Post-test</th><th class="num">Post %</th><th class="num">Gain</th></tr>
+        </thead>
+        <tbody>
+          @for (r of sheetRows(); track r.id; let i = $index) {
+            <tr>
+              <td class="muted">{{ i + 1 }}</td>
+              <td><strong>{{ r.name }}</strong><br /><span class="muted small">{{ r.learnerNo }}</span></td>
+              <td class="num">
+                <input class="input score-in" type="number" min="0" [max]="preTotal" step="0.5" [ngModel]="r.preScore" (ngModelChange)="setSheetScore(r.id, 'preScore', $event)" [attr.aria-label]="'Pre-test score for ' + r.name" />
+              </td>
+              <td class="num muted">{{ pct(prePct(r), 0) }}</td>
+              <td class="num">
+                <input class="input score-in" type="number" min="0" [max]="postTotal" step="0.5" [ngModel]="r.postScore" (ngModelChange)="setSheetScore(r.id, 'postScore', $event)" [attr.aria-label]="'Post-test score for ' + r.name" />
+              </td>
+              <td class="num muted">{{ pct(postPct(r), 0) }}</td>
+              <td class="num"><strong [class.up]="(gain(r) ?? 0) > 0" [class.down]="(gain(r) ?? 0) < 0">{{ signed(gain(r)) }}</strong></td>
+            </tr>
+          } @empty {
+            <tr><td colspan="7" class="empty">No active learners in this section.</td></tr>
+          }
+        </tbody>
+      </table>
+    </div>
+    <div class="row actions-bar">
+      <button type="button" class="btn" (click)="sheetOpen.set(false)">Cancel</button>
+      <button type="button" class="btn primary" (click)="saveSheet()" [disabled]="sheetSaving() || !(sheetStats().pre + sheetStats().post)">{{ sheetSaving() ? 'Saving…' : 'Save Scores' }}</button>
+    </div>
+  } @else {
+    <p class="empty">Choose a section and competency to load the class list.</p>
+  }
+</app-modal>
+
+<!-- Regular assessment editor -->
 <app-modal [open]="editorOpen()" [title]="editingId ? 'Edit Assessment & Scores' : 'New Assessment'" [width]="820" (closed)="editorOpen.set(false)">
   <form (ngSubmit)="save()">
     <div class="form-grid">
@@ -127,7 +373,7 @@
         <span>Competency</span>
         <select class="input" name="competencyId" [(ngModel)]="form.competencyId" required>
           <option [ngValue]="null" disabled>Choose…</option>
-          @for (c of competencies(); track c.id) {
+          @for (c of data()?.competencies ?? []; track c.id) {
             <option [ngValue]="c.id">{{ c.code }} · {{ c.learningArea }}</option>
           }
         </select>

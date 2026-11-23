@@ -2,6 +2,7 @@
   <header class="page-head">
     <h1><app-icon name="calendar-check" [size]="28" /> Attendance</h1>
     <div class="tools">
+      <app-subject-filter />
       @if (data(); as d) {
         @if (d.sections.length > 1) {
           <select class="input" [(ngModel)]="sectionId" (ngModelChange)="load()" aria-label="Section">
@@ -25,10 +26,13 @@
     <div class="card empty">{{ error() }}</div>
   } @else if (data()) {
     @let d = data()!;
+    @if (subject.selected(); as s) {
+      <p class="scope-note"><app-icon name="book" [size]="16" /> Showing <strong>{{ s.name }}</strong> class periods only: "absent" means absent from {{ s.name }} that day.</p>
+    }
     <section class="grid grid-4">
       <div class="kpi-tile compact">
         <span class="ico"><app-icon name="users" [size]="24" /></span>
-        <div><div class="val">{{ d.kpis.learners }}</div><div class="lbl">Total Learners</div></div>
+        <div><div class="val">{{ d.kpis.learners }}</div><div class="lbl">Total Learners · {{ d.kpis.belowTarget }} below {{ d.attendanceTarget }}%</div></div>
       </div>
       <div class="kpi-tile compact green">
         <span class="ico"><app-icon name="check" [size]="24" /></span>
@@ -121,8 +125,75 @@
             </tbody>
           </table>
         </div>
+        <header class="panel-head light"><h2><app-icon name="calendar" /> Weekly Summary</h2></header>
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>Week</th><th class="num">Days</th><th class="num">Absent</th><th class="num">Tardy</th><th class="num">Rate</th></tr></thead>
+            <tbody>
+              @for (w of d.weekly; track w.week) {
+                <tr>
+                  <td class="nowrap">{{ fmtDate(w.week) }} – {{ fmtDate(w.end) }}</td>
+                  <td class="num">{{ w.days }}</td>
+                  <td class="num">{{ w.absent }}</td>
+                  <td class="num">{{ w.late }}</td>
+                  <td class="num"><strong>{{ pct(w.rate) }}</strong></td>
+                </tr>
+              } @empty {
+                <tr><td colspan="5" class="empty">No weeks recorded yet.</td></tr>
+              }
+            </tbody>
+          </table>
+        </div>
       </article>
     </section>
+
+    <article class="panel">
+      <header class="panel-head">
+        <h2><app-icon name="users" /> Learner Attendance · {{ subject.label() }}</h2>
+        <span class="row-wrap">
+          <input class="input sm-search" type="search" placeholder="Search learner…" [ngModel]="learnerQuery()" (ngModelChange)="learnerQuery.set($event)" aria-label="Search learners" />
+          <label class="check small">
+            <span class="switch"><input type="checkbox" [ngModel]="onlyBelow()" (ngModelChange)="onlyBelow.set($event)" /><span></span></span>
+            Needs attention
+          </label>
+          <button type="button" class="btn sm" (click)="exportLearners()"><app-icon name="download" [size]="15" /> Excel</button>
+        </span>
+      </header>
+      <p class="muted small pad">School year to date, lowest attendance first. <strong>Lessons missed</strong> counts class meetings the learner was absent from where a competency was taught, so you can see whose absences affect their learning.</p>
+      <div class="table-wrap tall">
+        <table class="table stacked">
+          <thead>
+            <tr>
+              <th>Learner</th><th>Section</th><th class="num">Present</th><th class="num">Tardy</th><th class="num">Absent</th>
+              <th class="num">Excused</th><th class="num">Attendance</th><th>Lessons missed</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (l of learnerRows(); track l.id) {
+              <tr>
+                <td data-label="Learner"><a [routerLink]="['/learners', l.id]"><strong>{{ l.name }}</strong></a><br /><span class="muted small">{{ l.learnerNo }}</span></td>
+                <td data-label="Section">{{ l.section }}</td>
+                <td data-label="Present" class="num">{{ l.present }}</td>
+                <td data-label="Tardy" class="num">{{ l.late }}</td>
+                <td data-label="Absent" class="num">{{ l.absent }}</td>
+                <td data-label="Excused" class="num">{{ l.excused }}</td>
+                <td data-label="Attendance" class="num"><span class="badge" [class.critical]="l.belowTarget" [class.success]="!l.belowTarget && l.rate !== null">{{ pct(l.rate) }}</span></td>
+                <td data-label="Lessons missed">
+                  @if (l.missedLessons) {
+                    <strong>{{ l.missedLessons }}</strong>
+                    <span class="muted small"> · {{ missedText(l) }}</span>
+                  } @else {
+                    <span class="muted small">None</span>
+                  }
+                </td>
+              </tr>
+            } @empty {
+              <tr><td colspan="8" class="empty">No learners match.</td></tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </article>
   } @else {
     <div class="grid grid-4">
       <div class="skeleton" style="min-height: 84px"></div><div class="skeleton" style="min-height: 84px"></div>
@@ -140,7 +211,10 @@
         <span>Date</span>
         <input class="input" type="date" [(ngModel)]="recDate" [max]="today" (change)="loadPeriods()" />
       </label>
-      <p class="muted small">Choose a class period. You can record your own classes and your advisory section's classes.</p>
+      <p class="muted small">
+        Choose a class period{{ subject.selected() ? ' (' + subject.label() + ' only; switch to All Subjects to see every period)' : '' }}.
+        You can record your own classes and your advisory section's classes.
+      </p>
     </div>
     @if (periods() === null) {
       <div class="skeleton" style="min-height: 160px"></div>
@@ -156,6 +230,9 @@
               <strong>{{ p.subject }}</strong>
               <span class="meta"><app-icon name="home" [size]="13" /> {{ p.room }}</span>
               <span class="meta"><app-icon name="user" [size]="13" /> {{ p.teacher ?? 'No teacher' }}</span>
+              @if (p.competency) {
+                <span class="meta"><app-icon name="target" [size]="13" /> {{ p.competency }}</span>
+              }
               <span class="badge" [class.success]="p.recorded && p.recorded >= (p.learners ?? 0)" [class.warning]="p.recorded && p.recorded < (p.learners ?? 0)">
                 {{ p.recorded ? p.recorded + '/' + p.learners + ' recorded' : 'Not recorded' }}
               </span>
@@ -180,6 +257,24 @@
     @if (r.recorded) {
       <p class="note"><app-icon name="info" [size]="16" /> This period was already recorded. Saving will update it.</p>
     }
+    <div class="session-bar">
+      <label class="field">
+        <span>Competency taught in this meeting</span>
+        <select class="input" [(ngModel)]="sessionCompetencyId" aria-label="Competency taught">
+          <option [ngValue]="null">Not specified</option>
+          @for (c of r.competencies; track c.id) {
+            <option [ngValue]="c.id">{{ c.quarter | term }}{{ c.learningPeriod ? ' · ' + c.learningPeriod : '' }} · {{ c.code }}: {{ c.title }}</option>
+          }
+        </select>
+      </label>
+      <label class="field">
+        <span>Topic / lesson (optional)</span>
+        <input class="input" [(ngModel)]="sessionTopic" maxlength="190" placeholder="e.g. Exponential functions, guided practice" />
+      </label>
+      @if (!r.session.saved && r.session.competencyId) {
+        <p class="muted small full">Pre-filled from the previous meeting. Absences are linked to this competency so missed lessons can be caught up.</p>
+      }
+    </div>
     <div class="row-wrap tools-row">
       <button type="button" class="btn sm" (click)="markAllPresent()"><app-icon name="check" [size]="15" /> Mark unmarked present ({{ to12h(r.period.startTime) }})</button>
       @if (hasEarlier()) {

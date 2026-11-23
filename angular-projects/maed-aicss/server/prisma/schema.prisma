@@ -54,6 +54,22 @@ enum AlertType {
   BELOW_TARGET
   COMPETENCY_NOT_MASTERED
   NEEDS_RETEACHING
+  SUBJECT_ABSENCE
+  MISSED_LESSONS
+  LOW_PRETEST
+  LIMITED_GAIN
+  CLASS_LOW_GAIN
+  CLASS_LOW_PRETEST
+  ENRICHMENT
+}
+
+/// Recommended kind of instructional intervention for an alert.
+enum Intervention {
+  RETEACHING
+  REMEDIATION
+  ENRICHMENT
+  CATCH_UP
+  ATTENDANCE
 }
 
 enum AlertStatus {
@@ -74,12 +90,14 @@ model User {
   createdAt    DateTime      @default(now())
   lastLoginAt  DateTime?
 
-  sections        Section[]
-  attendance      AttendanceRecord[]
-  assessments     Assessment[]
-  alertFollowUps  Alert[]
-  activity        ActivityLog[]
-  schedules       ClassSchedule[] @relation("ScheduleTeacher")
+  sections       Section[]
+  attendance     AttendanceRecord[]
+  assessments    Assessment[]
+  alertFollowUps Alert[]
+  activity       ActivityLog[]
+  schedules      ClassSchedule[]    @relation("ScheduleTeacher")
+  sessions       ClassSession[]
+  prePostTests   PrePostTest[]
 }
 
 /// Single-row table holding school-wide configuration and monitoring preferences.
@@ -107,25 +125,30 @@ model SchoolSetting {
   lateGraceMinutes      Int     @default(15)
   /// Partial days (present but missed some periods) in the last 30 school days that raise an alert
   missedClassThreshold  Int     @default(3)
+  /// Pre-test percentage below which a learner is flagged for remediation
+  pretestLowThreshold   Int     @default(40)
+  /// Minimum post-test minus pre-test gain (percentage points) counted as real improvement
+  minLearningGain       Int     @default(10)
 }
 
 model Section {
-  id         Int    @id @default(autoincrement())
-  name       String @unique
+  id         Int      @id @default(autoincrement())
+  name       String   @unique
   gradeLevel Int
   strand     String
   teacherId  Int?
-  teacher    User?  @relation(fields: [teacherId], references: [id], onDelete: SetNull)
+  teacher    User?    @relation(fields: [teacherId], references: [id], onDelete: SetNull)
   /// Room allocated to the section (advisory / homeroom)
   room       String?
   /// The section's specialization elective (e.g. Physics, Programming, Bakery Operation)
   electiveId Int?
   elective   Subject? @relation(fields: [electiveId], references: [id], onDelete: SetNull)
 
-  learners    Learner[]
-  assessments Assessment[]
-  alerts      Alert[]
-  schedules   ClassSchedule[]
+  learners     Learner[]
+  assessments  Assessment[]
+  alerts       Alert[]
+  schedules    ClassSchedule[]
+  prePostTests PrePostTest[]
 }
 
 enum SubjectKind {
@@ -146,28 +169,31 @@ model Subject {
   defaultRoom String?
   active      Boolean     @default(true)
 
-  sections  Section[]
-  schedules ClassSchedule[]
+  sections     Section[]
+  schedules    ClassSchedule[]
+  competencies Competency[]
+  alerts       Alert[]
 }
 
 /// One weekly class meeting: a subject taught to a section at a set day, time and room.
 model ClassSchedule {
-  id           Int     @id @default(autoincrement())
-  sectionId    Int
-  section      Section @relation(fields: [sectionId], references: [id], onDelete: Cascade)
-  subjectId    Int
-  subject      Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  id        Int     @id @default(autoincrement())
+  sectionId Int
+  section   Section @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  subjectId Int
+  subject   Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
   /// Subject teacher (may differ from the section adviser)
-  teacherId    Int?
-  teacher      User?   @relation("ScheduleTeacher", fields: [teacherId], references: [id], onDelete: SetNull)
+  teacherId Int?
+  teacher   User?   @relation("ScheduleTeacher", fields: [teacherId], references: [id], onDelete: SetNull)
   /// 1 = Monday ... 6 = Saturday
-  dayOfWeek    Int
+  dayOfWeek Int
   /// "HH:mm", 24-hour, school-local time
-  startTime    String
-  endTime      String
-  room         String
+  startTime String
+  endTime   String
+  room      String
 
   attendance AttendanceRecord[]
+  sessions   ClassSession[]
 
   @@index([sectionId, dayOfWeek])
   @@index([room, dayOfWeek])
@@ -190,9 +216,10 @@ model Learner {
   avatarHue Int           @default(210)
   createdAt DateTime      @default(now())
 
-  attendance AttendanceRecord[]
-  scores     AssessmentScore[]
-  alerts     Alert[]
+  attendance    AttendanceRecord[]
+  scores        AssessmentScore[]
+  prePostScores PrePostScore[]
+  alerts        Alert[]
 }
 
 /// Daily time record: one row per learner, per class period (ClassSchedule), per date.
@@ -217,16 +244,44 @@ model AttendanceRecord {
   @@index([scheduleId, date])
 }
 
-model Competency {
-  id           Int     @id @default(autoincrement())
-  code         String  @unique
-  learningArea String
-  title        String  @db.Text
-  quarter      Int
-  active       Boolean @default(true)
+/// What was taught in one class meeting (a ClassSchedule period on a date). Links
+/// attendance to the competency covered, so absences can be traced to missed lessons.
+model ClassSession {
+  id           Int           @id @default(autoincrement())
+  scheduleId   Int
+  schedule     ClassSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  date         DateTime      @db.Date
+  competencyId Int?
+  competency   Competency?   @relation(fields: [competencyId], references: [id], onDelete: SetNull)
+  topic        String?
+  recordedById Int?
+  recordedBy   User?         @relation(fields: [recordedById], references: [id], onDelete: SetNull)
+  recordedAt   DateTime      @default(now())
 
-  assessments Assessment[]
-  alerts      Alert[]
+  @@unique([scheduleId, date])
+  @@index([competencyId])
+}
+
+model Competency {
+  id             Int      @id @default(autoincrement())
+  code           String   @unique
+  /// Subject this competency belongs to (the basis of subject filtering)
+  subjectId      Int?
+  subject        Subject? @relation(fields: [subjectId], references: [id], onDelete: SetNull)
+  /// Subject name, kept in sync with `subject` for display and older records
+  learningArea   String
+  title          String   @db.Text
+  quarter        Int
+  /// Learning period within the quarter, e.g. "Weeks 1–2"
+  learningPeriod String?
+  active         Boolean  @default(true)
+
+  assessments  Assessment[]
+  alerts       Alert[]
+  sessions     ClassSession[]
+  prePostTests PrePostTest[]
+
+  @@index([subjectId, quarter])
 }
 
 model Assessment {
@@ -260,31 +315,75 @@ model AssessmentScore {
   @@unique([assessmentId, learnerId])
 }
 
+/// Competency-level pre-test and post-test given to one section in a school year.
+model PrePostTest {
+  id           Int        @id @default(autoincrement())
+  sectionId    Int
+  section      Section    @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  competencyId Int
+  competency   Competency @relation(fields: [competencyId], references: [id], onDelete: Cascade)
+  academicYear String
+  quarter      Int
+  /// Number of items in the pre-test / post-test
+  preTotal     Int
+  postTotal    Int
+  preDate      DateTime?  @db.Date
+  postDate     DateTime?  @db.Date
+  createdById  Int?
+  createdBy    User?      @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  scores PrePostScore[]
+
+  @@unique([sectionId, competencyId, academicYear])
+  @@index([competencyId])
+}
+
+/// One learner's pre-test and post-test scores (either may still be blank).
+model PrePostScore {
+  id        Int         @id @default(autoincrement())
+  testId    Int
+  test      PrePostTest @relation(fields: [testId], references: [id], onDelete: Cascade)
+  learnerId Int
+  learner   Learner     @relation(fields: [learnerId], references: [id], onDelete: Cascade)
+  preScore  Float?
+  postScore Float?
+
+  @@unique([testId, learnerId])
+  @@index([learnerId])
+}
+
 /// Instructional alerts are generated from attendance/assessment rules and
 /// identified by a stable `key`, so re-running the rules updates instead of duplicating.
 model Alert {
-  id            Int         @id @default(autoincrement())
-  key           String      @unique
-  type          AlertType
-  level         AlertLevel
-  title         String
-  detail        String      @db.Text
-  action        String      @db.Text
-  learnerId     Int?
-  learner       Learner?    @relation(fields: [learnerId], references: [id], onDelete: Cascade)
-  sectionId     Int?
-  section       Section?    @relation(fields: [sectionId], references: [id], onDelete: Cascade)
-  competencyId  Int?
-  competency    Competency? @relation(fields: [competencyId], references: [id], onDelete: Cascade)
-  status        AlertStatus @default(OPEN)
-  followUpNote  String?     @db.Text
-  followUpById  Int?
-  followUpBy    User?       @relation(fields: [followUpById], references: [id], onDelete: SetNull)
-  followUpAt    DateTime?
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+  id           Int           @id @default(autoincrement())
+  key          String        @unique
+  type         AlertType
+  level        AlertLevel
+  title        String
+  detail       String        @db.Text
+  action       String        @db.Text
+  learnerId    Int?
+  learner      Learner?      @relation(fields: [learnerId], references: [id], onDelete: Cascade)
+  sectionId    Int?
+  section      Section?      @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  competencyId Int?
+  competency   Competency?   @relation(fields: [competencyId], references: [id], onDelete: Cascade)
+  /// Subject the alert concerns; null for whole-day (all subjects) attendance alerts
+  subjectId    Int?
+  subject      Subject?      @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  intervention Intervention?
+  status       AlertStatus   @default(OPEN)
+  followUpNote String?       @db.Text
+  followUpById Int?
+  followUpBy   User?         @relation(fields: [followUpById], references: [id], onDelete: SetNull)
+  followUpAt   DateTime?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
 
   @@index([status, level])
+  @@index([subjectId])
 }
 
 model ActivityLog {

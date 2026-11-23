@@ -26,7 +26,7 @@ app.use('/api/dashboard', require('./routes/dashboard').router);
 app.use('/api/attendance', require('./routes/attendance'));
 app.use('/api/competencies', require('./routes/competencies'));
 app.use('/api/assessments', require('./routes/assessments'));
-app.use('/api/alerts', require('./routes/alerts'));
+app.use('/api/alerts', require('./routes/alerts').router);
 app.use('/api/reports', require('./routes/reports'));
 app.use('/api/learners', require('./routes/learners'));
 app.use('/api/admin', require('./routes/admin'));
@@ -51,6 +51,10 @@ app.use((err, _req, res, _next) => {
   res.status(status).json({ error: message });
 });
 
-app.listen(PORT, () => {
-  console.log(`AICSS API listening on http://localhost:${PORT}`);
-});
+require('./lib/backfill')
+  .runBackfill()
+  .finally(() => {
+    app.listen(PORT, () => {
+      console.log(`AICSS API listening on http://localhost:${PORT}`);
+    });
+  });

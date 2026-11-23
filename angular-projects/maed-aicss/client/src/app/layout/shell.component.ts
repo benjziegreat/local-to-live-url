@@ -6,6 +6,7 @@ import { AuthService } from '../core/auth.service';
 import { NavStateService } from '../core/nav-state.service';
 import { poll } from '../core/polling';
 import { ApiService } from '../core/api.service';
+import { SubjectFilterService } from '../core/subject-filter.service';
 import { AvatarComponent } from '../shared/avatar.component';
 import { IconComponent } from '../shared/icon.component';
 import { LogoComponent } from '../shared/logo.component';
@@ -54,6 +55,8 @@ export class ShellComponent {
 
   constructor() {
     this.auth.refresh();
+    // Subject filter options for this user (shared by every module).
+    inject(SubjectFilterService).load();
     poll(() => this.nav.refreshAlerts(), 60_000);
     this.api.settings().subscribe({ next: (s) => this.school.set({ schoolLevel: s.schoolLevel, academicYear: s.academicYear }), error: () => {} });
     this.router.events

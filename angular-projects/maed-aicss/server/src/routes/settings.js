@@ -7,7 +7,8 @@ const { asyncHandler, HttpError } = require('../lib/http');
 const { getSettings, clearSettingsCache } = require('../lib/settings');
 const { invalidateAlerts } = require('../lib/alerts');
 const { logActivity } = require('../lib/log');
-const { sectionWhere } = require('../lib/scope');
+const { sectionWhere, subjectOf, subjectsFor } = require('../lib/scope');
+const { termLabel } = require('../lib/shape');
 
 const router = express.Router();
 router.use(authenticate);
@@ -40,7 +41,7 @@ router.put(
       division: String(b.division ?? '').trim().slice(0, 120),
       region: String(b.region ?? '').trim().slice(0, 120),
       academicYear: b.academicYear,
-      currentQuarter: intIn(b.currentQuarter, 1, 4, 'Current quarter'),
+      currentQuarter: intIn(b.currentQuarter, 1, 3, 'Current term'),
       enableAttendance: !!b.enableAttendance,
       enableCompetency: !!b.enableCompetency,
       enableAlerts: !!b.enableAlerts,
@@ -50,11 +51,13 @@ router.put(
       reteachThreshold: intIn(b.reteachThreshold, 10, 100, 'Reteach threshold'),
       lateGraceMinutes: intIn(b.lateGraceMinutes ?? 15, 0, 60, 'Late grace period'),
       missedClassThreshold: intIn(b.missedClassThreshold ?? 3, 1, 30, 'Missed-class alert threshold'),
+      pretestLowThreshold: intIn(b.pretestLowThreshold ?? 40, 0, 100, 'Low pre-test threshold'),
+      minLearningGain: intIn(b.minLearningGain ?? 10, 0, 100, 'Minimum learning gain'),
     };
     const saved = await prisma.schoolSetting.upsert({ where: { id: 1 }, update: data, create: { id: 1, ...data } });
     clearSettingsCache();
     invalidateAlerts();
-    logActivity(req.user.id, 'Updated settings', 'School Configuration', `${saved.schoolName} · ${saved.academicYear} · Q${saved.currentQuarter}`);
+    logActivity(req.user.id, 'Updated settings', 'School Configuration', `${saved.schoolName} · ${saved.academicYear} · ${termLabel(saved.currentQuarter)}`);
     res.json(saved);
   }),
 );
@@ -64,8 +67,9 @@ router.put(
 router.get(
   '/sections',
   asyncHandler(async (req, res) => {
+    // With ?subjectId: the sections where the user handles that subject (subject filter).
     const sections = await prisma.section.findMany({
-      where: sectionWhere(req.user),
+      where: sectionWhere(req.user, subjectOf(req)),
       include: { teacher: true, elective: true, _count: { select: { learners: { where: { status: 'ACTIVE' } }, schedules: true } } },
       orderBy: { name: 'asc' },
     });
@@ -284,6 +288,14 @@ router.delete(
 
 // ---- Subjects catalog -----------------------------------------------------------
 
+/** Options for the subject filter shown on every module: { allowAll, subjects }. */
+router.get(
+  '/subjects/mine',
+  asyncHandler(async (req, res) => {
+    res.json(await subjectsFor(req.user));
+  }),
+);
+
 router.get(
   '/subjects',
   asyncHandler(async (_req, res) => {
@@ -337,9 +349,9 @@ router.put(
     const data = cleanSubject(req.body);
     const s = await prisma.$transaction(async (tx) => {
       const updated = await tx.subject.update({ where: { id }, data });
-      // Competencies are grouped by subject name; keep them attached after a rename.
+      // Competencies keep the subject name as their learning area; keep it in sync after a rename.
       if (before.name !== updated.name) {
-        await tx.competency.updateMany({ where: { learningArea: before.name }, data: { learningArea: updated.name } });
+        await tx.competency.updateMany({ where: { OR: [{ subjectId: id }, { subjectId: null, learningArea: before.name }] }, data: { learningArea: updated.name, subjectId: id } });
       }
       return updated;
     }).catch(subjectClash);

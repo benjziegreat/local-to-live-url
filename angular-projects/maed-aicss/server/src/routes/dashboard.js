@@ -4,10 +4,13 @@ const { authenticate } = require('../lib/auth');
 const { asyncHandler } = require('../lib/http');
 const { getSettings } = require('../lib/settings');
 const { syncAlerts } = require('../lib/alerts');
-const { learnerWhere, sectionWhere, isAdmin, competencyFilter, optInt } = require('../lib/scope');
-const { learnerMetrics, competencyStats, dailySeries, totals, monthlySeries, round1, STATUS_ORDER } = require('../lib/metrics');
+const { learnerWhere, sectionWhere, isAdmin, competencyWhere, optInt, subjectOf } = require('../lib/scope');
+const { learnerMetrics, competencyStats, dailySeries, totals, monthlySeries, scorePercents, distribution, round1, STATUS_ORDER } = require('../lib/metrics');
 const { dateOnly, dayKey, weekStart, parseDay, schoolYearStart } = require('../lib/time');
 const { learnerRow, alertRow, ALERT_INCLUDE } = require('../lib/shape');
+const { testWhere } = require('../lib/metrics');
+const { loadPrePost, summarize, competencyRows } = require('../lib/prepost');
+const { scopeWhere: alertScope } = require('./alerts');
 
 const router = express.Router();
 router.use(authenticate);
@@ -51,6 +54,25 @@ function areaProgress(stats, competencies, settings) {
   });
 }
 
+/** Per-competency progress rows (same shape as areaProgress) for a single-subject view. */
+function competencyProgress(stats, competencies, settings) {
+  return competencies.map((c) => {
+    const s = stats.get(c.id);
+    const masteryRate = s?.masteryRate ?? null;
+    return {
+      learningArea: c.code,
+      title: c.title,
+      competencies: 1,
+      assessed: s?.assessed ?? 0,
+      mastered: s?.MASTERED ?? 0,
+      inProgress: s?.IN_PROGRESS ?? 0,
+      needsSupport: s?.NEEDS_SUPPORT ?? 0,
+      masteryRate,
+      status: masteryRate === null ? 'NO_DATA' : masteryRate >= settings.masteryTarget ? 'ON_TRACK' : masteryRate >= settings.masteryTarget - 15 ? 'MONITOR' : 'NEEDS_SUPPORT',
+    };
+  });
+}
+
 router.get(
   '/',
   asyncHandler(async (req, res) => {
@@ -58,17 +80,21 @@ router.get(
     await syncAlerts();
     const range = req.query.range === 'month' ? 'month' : 'week';
     const sectionId = optInt(req.query.sectionId);
-    const lw = learnerWhere(req.user, { sectionId });
+    const subjectId = subjectOf(req);
+    const lw = learnerWhere(req.user, { sectionId, subjectId });
+    const sectionScope = { ...sectionWhere(req.user, subjectId), ...(sectionId && { id: sectionId }) };
 
-    const [learners, allCompetencies, sections, relevant] = await Promise.all([
+    const [learners, competencies, sections] = await Promise.all([
       prisma.learner.findMany({ where: lw, include: { section: true }, orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }] }),
-      prisma.competency.findMany({ where: { active: true }, orderBy: [{ learningArea: 'asc' }, { code: 'asc' }] }),
-      prisma.section.findMany({ where: sectionWhere(req.user), orderBy: { name: 'asc' } }),
-      competencyFilter(req.user, sectionId),
+      prisma.competency.findMany({ where: { ...competencyWhere(req.user, { subjectId, sectionId }), active: true }, orderBy: [{ learningArea: 'asc' }, { quarter: 'asc' }, { code: 'asc' }] }),
+      prisma.section.findMany({ where: sectionWhere(req.user, subjectId), orderBy: { name: 'asc' } }),
     ]);
-    const competencies = allCompetencies.filter(relevant);
-    const metrics = await learnerMetrics(learners, settings);
-    const series = await dailySeries(lw, schoolYearStart(settings.academicYear), dateOnly());
+    const [metrics, series, pcts, prePost] = await Promise.all([
+      learnerMetrics(learners, settings, { subjectId }),
+      dailySeries(lw, schoolYearStart(settings.academicYear), dateOnly(), { subjectId }),
+      scorePercents({ section: sectionScope, ...(subjectId && { competency: { subjectId } }) }),
+      loadPrePost({ ...testWhere(settings, { subjectId }), section: sectionScope }, settings),
+    ]);
 
     const recent = totals(series.slice(-20));
     const previous = totals(series.slice(-40, -20));
@@ -76,7 +102,8 @@ router.get(
       .map((l) => learnerRow(l, metrics.get(l.id)))
       .sort((a, b) => STATUS_ORDER[a.monitoring] - STATUS_ORDER[b.monitoring] || a.name.localeCompare(b.name));
 
-    const alertWhere = { status: { not: 'RESOLVED' }, ...(isAdmin(req.user) ? {} : { section: { teacherId: req.user.id } }) };
+    const alertWhere = { status: { not: 'RESOLVED' }, ...alertScope(req.user, { sectionId, subjectId }) };
+    const stats = competencyStats(metrics, settings);
     const [alerts, alertCounts] = await Promise.all([
       prisma.alert.findMany({ where: alertWhere, include: ALERT_INCLUDE, orderBy: [{ level: 'asc' }, { updatedAt: 'desc' }], take: 4 }),
       prisma.alert.groupBy({ by: ['level'], where: alertWhere, _count: { _all: true } }),
@@ -94,9 +121,17 @@ router.get(
         atRisk: rows.filter((r) => r.monitoring === 'AT_RISK').length,
         openAlerts: alertCounts.reduce((n, c) => n + c._count._all, 0),
       },
+      subjectId: subjectId ?? null,
       trend: trendFor(series, range),
       monthly: monthlySeries(series),
-      competencyProgress: areaProgress(competencyStats(metrics, settings), competencies, settings),
+      // All subjects: progress per learning area. One subject: progress per competency.
+      progressBy: subjectId ? 'competency' : 'area',
+      competencyProgress: subjectId ? competencyProgress(stats, competencies, settings) : areaProgress(stats, competencies, settings),
+      assessment: { masteryTarget: settings.masteryTarget, ...distribution(pcts, settings) },
+      prePost: {
+        summary: { tests: prePost.tests.length, ...summarize(prePost.records, settings) },
+        byCompetency: competencyRows(prePost.records, settings).slice(0, 8),
+      },
       alerts: alerts.map(alertRow),
       learners: rows,
     };
@@ -110,7 +145,7 @@ router.get(
         users: users.reduce((n, u) => n + u._count._all, 0),
         activeUsers: users.filter((u) => u.status === 'ACTIVE').reduce((n, u) => n + u._count._all, 0),
         teachers: users.filter((u) => u.role === 'TEACHER').reduce((n, u) => n + u._count._all, 0),
-        sections: sections.length,
+        sections: await prisma.section.count(),
         reportsGenerated: await prisma.activityLog.count({ where: { action: 'Generated report' } }),
         activity: activity.map((a) => ({
           id: a.id,

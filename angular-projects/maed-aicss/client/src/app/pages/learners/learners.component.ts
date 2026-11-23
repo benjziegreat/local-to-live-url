@@ -6,16 +6,18 @@ import { AuthService } from '../../core/auth.service';
 import { errorMessage } from '../../core/auth.interceptor';
 import { MONITORING_LABEL, MONITORING_TONE, downloadCsv, pct, todayIso } from '../../core/format';
 import { LearnerInput, LearnerList, LearnerRow, Monitoring } from '../../core/models';
+import { SubjectFilterService, onSubjectChange } from '../../core/subject-filter.service';
 import { ToastService } from '../../core/toast.service';
 import { AvatarComponent } from '../../shared/avatar.component';
 import { IconComponent } from '../../shared/icon.component';
 import { ModalComponent } from '../../shared/modal.component';
+import { SubjectFilterComponent } from '../../shared/subject-filter.component';
 
 const BLANK: LearnerInput = { firstName: '', lastName: '', sex: 'M', sectionId: null, lrn: '', birthDate: '', guardian: '', contactNo: '' };
 
 @Component({
   selector: 'app-learners',
-  imports: [FormsModule, RouterLink, IconComponent, AvatarComponent, ModalComponent],
+  imports: [FormsModule, RouterLink, IconComponent, AvatarComponent, ModalComponent, SubjectFilterComponent],
   templateUrl: './learners.component.html',
   styleUrl: './learners.component.scss',
 })
@@ -24,6 +26,7 @@ export class LearnersComponent {
   private toast = inject(ToastService);
   private router = inject(Router);
   protected readonly auth = inject(AuthService);
+  protected readonly subject = inject(SubjectFilterService);
 
   protected readonly data = signal<LearnerList | null>(null);
   protected readonly error = signal<string | null>(null);
@@ -38,6 +41,8 @@ export class LearnersComponent {
   protected readonly MON_TONE = MONITORING_TONE;
 
   protected readonly formOpen = signal(false);
+  /** Every section (not limited by the subject filter) for the learner form. */
+  protected readonly formSections = signal<{ id: number; name: string }[]>([]);
   protected readonly saving = signal(false);
   protected form: LearnerInput = { ...BLANK };
   protected editingId: number | null = null;
@@ -47,13 +52,16 @@ export class LearnersComponent {
   constructor() {
     const qp = inject(ActivatedRoute).snapshot.queryParamMap;
     this.sort = qp.get('sort') === 'risk' ? 'risk' : 'name';
-    this.load();
+    onSubjectChange((first) => {
+      if (!first) this.sectionId = null;
+      this.load();
+    });
   }
 
   protected load() {
     this.error.set(null);
     this.api
-      .learners({ q: this.q, sectionId: this.sectionId, monitoring: this.monitoring, status: this.archived ? 'ARCHIVED' : null, sort: this.sort })
+      .learners({ q: this.q, sectionId: this.sectionId, monitoring: this.monitoring, status: this.archived ? 'ARCHIVED' : null, sort: this.sort, ...this.subject.query() })
       .subscribe({
         next: (d) => this.data.set(d),
         error: (err) => this.error.set(errorMessage(err)),
@@ -71,6 +79,7 @@ export class LearnersComponent {
 
   protected openForm(l?: LearnerRow) {
     this.editingId = l?.id ?? null;
+    this.api.sections().subscribe({ next: (s) => this.formSections.set(s), error: () => {} });
     if (l) {
       // Fetch the full record for birthdate/guardian/contact
       this.api.learner(l.id).subscribe({
@@ -135,11 +144,19 @@ export class LearnersComponent {
         { key: 'name', label: 'Name' },
         { key: 'sex', label: 'Sex' },
         { key: 'section', label: 'Grade & Section' },
+        { key: 'subject', label: 'Subject' },
+        { key: 'subjectTeacher', label: 'Subject Teacher' },
         { key: 'attendance', label: 'Attendance' },
         { key: 'assessment', label: 'Assessment Avg' },
         { key: 'status', label: 'Monitoring' },
       ],
-      d.learners.map((l) => ({ ...l, attendance: pct(l.attendanceRate), assessment: pct(l.assessmentAvg), status: MONITORING_LABEL[l.monitoring] })),
+      d.learners.map((l) => ({
+        ...l,
+        subject: this.subject.label(),
+        attendance: pct(l.attendanceRate),
+        assessment: pct(l.assessmentAvg),
+        status: MONITORING_LABEL[l.monitoring],
+      })),
     );
   }
 }

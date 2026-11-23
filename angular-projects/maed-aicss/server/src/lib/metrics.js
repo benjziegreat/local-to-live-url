@@ -8,8 +8,13 @@
 //       LATE     attended, and late to at least one period
 //       PRESENT  attended
 //     A "partial" day = attended but absent from at least one period (possible cutting).
+//
+// Every calculation accepts `subjectId`: attendance then counts only that subject's class
+// periods (so "absent" means absent from the subject that day) and scores only that
+// subject's competencies. Competency mastery uses regular assessments plus post-tests
+// (pre-tests measure readiness before instruction, so they never count toward mastery).
 const prisma = require('./prisma');
-const { dayKey } = require('./time');
+const { dayKey, addDays, weekStart, parseDay } = require('./time');
 
 const round1 = (n) => Math.round(n * 10) / 10;
 const avg = (list) => (list.length ? list.reduce((a, b) => a + b, 0) / list.length : null);
@@ -96,29 +101,47 @@ async function recentWindowStart(n = 30) {
   return days.length ? dayKey(days[days.length - 1].date) : null;
 }
 
+/** Post-test results matching a PrePostScore `where`, as { learnerId, pct, competencyId, subjectId }. */
+async function postTestPercents(where) {
+  const rows = await prisma.prePostScore.findMany({
+    where: { postScore: { not: null }, ...where },
+    select: { learnerId: true, postScore: true, test: { select: { postTotal: true, competencyId: true, competency: { select: { subjectId: true } } } } },
+  });
+  return rows
+    .filter((r) => r.test.postTotal)
+    .map((r) => ({ learnerId: r.learnerId, pct: (r.postScore / r.test.postTotal) * 100, competencyId: r.test.competencyId, subjectId: r.test.competency.subjectId }));
+}
+
+/** Where-clause for PrePostTest rows of the current school year (optionally quarter / subject). */
+function testWhere(settings, { quarter, subjectId } = {}) {
+  return { academicYear: settings.academicYear, ...(quarter && { quarter }), ...(subjectId && { competency: { subjectId } }) };
+}
+
 /**
  * Per-learner metrics. `learners` = [{ id, sectionId, ... }].
- * Options: quarter (limits assessments), from/to (limits attendance).
+ * Options: quarter (limits assessments), from/to (limits attendance), subjectId (one subject).
  * Day counts (present/late/absent/excused/partialDays) are in learner-days;
  * attendanceRate is period-based.
  */
-async function learnerMetrics(learners, settings, { quarter, from, to } = {}) {
+async function learnerMetrics(learners, settings, { quarter, from, to, subjectId } = {}) {
   const ids = learners.map((l) => l.id);
   const result = new Map();
   if (!ids.length) return result;
 
   const dateFilter = from || to ? { date: { ...(from && { gte: from }), ...(to && { lte: to }) } } : {};
-  const [rows, windowStart, scores] = await Promise.all([
+  const assessmentFilter = { ...(quarter && { quarter }), ...(subjectId && { competency: { subjectId } }) };
+  const [rows, windowStart, scores, posts] = await Promise.all([
     prisma.attendanceRecord.groupBy({
       by: ['learnerId', 'date', 'status'],
-      where: { learnerId: { in: ids }, ...dateFilter },
+      where: { learnerId: { in: ids }, ...dateFilter, ...(subjectId && { schedule: { subjectId } }) },
       _count: { _all: true },
     }),
     recentWindowStart(30),
     prisma.assessmentScore.findMany({
-      where: { learnerId: { in: ids }, ...(quarter ? { assessment: { quarter } } : {}) },
+      where: { learnerId: { in: ids }, ...(Object.keys(assessmentFilter).length ? { assessment: assessmentFilter } : {}) },
       select: { learnerId: true, score: true, assessment: { select: { maxScore: true, competencyId: true } } },
     }),
+    postTestPercents({ learnerId: { in: ids }, test: testWhere(settings, { quarter, subjectId }) }),
   ]);
 
   for (const l of learners) {
@@ -165,6 +188,14 @@ async function learnerMetrics(learners, settings, { quarter, from, to } = {}) {
     list.push(pct);
     m.byCompetency.set(sc.assessment.competencyId, list);
   }
+  for (const p of posts) {
+    const m = result.get(p.learnerId);
+    if (!m) continue;
+    m.pcts.push(p.pct);
+    const list = m.byCompetency.get(p.competencyId) ?? [];
+    list.push(p.pct);
+    m.byCompetency.set(p.competencyId, list);
+  }
 
   for (const m of result.values()) {
     m.days = m.present + m.late + m.absent + m.excused;
@@ -208,10 +239,10 @@ const emptyDay = (date) => ({ date, present: 0, late: 0, absent: 0, excused: 0, 
  * Daily totals for the learners matching `learnerFilter`: learner counts by day status,
  * partial days, and the period-based attendance rate.
  */
-async function dailySeries(learnerFilter, from, to) {
+async function dailySeries(learnerFilter, from, to, { subjectId } = {}) {
   const rows = await prisma.attendanceRecord.groupBy({
     by: ['learnerId', 'date', 'status'],
-    where: { date: { gte: from, lte: to }, learner: learnerFilter },
+    where: { date: { gte: from, lte: to }, learner: learnerFilter, ...(subjectId && { schedule: { subjectId } }) },
     _count: { _all: true },
   });
   const byDay = new Map();
@@ -247,6 +278,140 @@ function monthlySeries(series) {
   return [...months].map(([month, list]) => ({ month, days: list.length, ...totals(list) }));
 }
 
+/** Group a daily series into school weeks: [{ week: Monday 'YYYY-MM-DD', end, days, ...totals }]. */
+function weeklySeries(series) {
+  const weeks = new Map();
+  for (const d of series) {
+    const key = dayKey(weekStart(parseDay(d.date)));
+    const list = weeks.get(key) ?? [];
+    list.push(d);
+    weeks.set(key, list);
+  }
+  return [...weeks].map(([week, list]) => ({ week, end: dayKey(addDays(parseDay(week), 4)), days: list.length, ...totals(list) }));
+}
+
+/** Percentages of every regular assessment score matching an Assessment `where`. */
+async function scorePercents(where) {
+  const scores = await prisma.assessmentScore.findMany({
+    where: { assessment: where, learner: { status: 'ACTIVE' } },
+    select: { score: true, assessment: { select: { maxScore: true } } },
+  });
+  return scores.filter((s) => s.assessment.maxScore).map((s) => (s.score / s.assessment.maxScore) * 100);
+}
+
+/** Average, pass rate and share per band: excellent (>= 90), satisfactory (>= target), needs improvement. */
+function distribution(pcts, settings) {
+  const excellent = pcts.filter((p) => p >= 90).length;
+  const satisfactory = pcts.filter((p) => p < 90 && p >= settings.masteryTarget).length;
+  const share = (n) => (pcts.length ? round1((n / pcts.length) * 100) : 0);
+  return {
+    average: pcts.length ? round1(avg(pcts)) : null,
+    scores: pcts.length,
+    passRate: share(excellent + satisfactory),
+    distribution: { excellent: share(excellent), satisfactory: share(satisfactory), needsImprovement: share(pcts.length - excellent - satisfactory) },
+  };
+}
+
+/**
+ * Lessons missed because of absence: class sessions that covered a competency, matched to
+ * the learner's ABSENT record for that period. Returns
+ *   missed: Map<learnerId, Map<competencyId, count>>
+ *   taught: Map<'sectionId|competencyId', sessions held>
+ */
+async function missedLessons({ learnerIds, subjectId } = {}) {
+  const sessions = await prisma.classSession.findMany({
+    where: { competencyId: { not: null }, ...(subjectId && { schedule: { subjectId } }) },
+    select: { scheduleId: true, date: true, competencyId: true, schedule: { select: { sectionId: true } } },
+  });
+  const taught = new Map();
+  const byKey = new Map();
+  for (const s of sessions) {
+    byKey.set(`${s.scheduleId}|${dayKey(s.date)}`, s.competencyId);
+    const k = `${s.schedule.sectionId}|${s.competencyId}`;
+    taught.set(k, (taught.get(k) ?? 0) + 1);
+  }
+  const missed = new Map();
+  if (!sessions.length || (learnerIds && !learnerIds.length)) return { missed, taught };
+  const absences = await prisma.attendanceRecord.findMany({
+    where: {
+      status: 'ABSENT',
+      scheduleId: { in: [...new Set(sessions.map((s) => s.scheduleId))] },
+      ...(learnerIds && { learnerId: { in: learnerIds } }),
+    },
+    select: { learnerId: true, scheduleId: true, date: true },
+  });
+  for (const a of absences) {
+    const competencyId = byKey.get(`${a.scheduleId}|${dayKey(a.date)}`);
+    if (!competencyId) continue;
+    const m = missed.get(a.learnerId) ?? new Map();
+    m.set(competencyId, (m.get(competencyId) ?? 0) + 1);
+    missed.set(a.learnerId, m);
+  }
+  return { missed, taught };
+}
+
+/**
+ * Per learner, per subject: period attendance (overall and in the recent window) and score
+ * percentages. Used by the alert rules. Returns Map<learnerId, Map<subjectId, stats>>.
+ */
+async function subjectBreakdown(learnerIds, settings, windowStart) {
+  const out = new Map();
+  if (!learnerIds.length) return out;
+  const [schedules, all, recent, scores, posts] = await Promise.all([
+    prisma.classSchedule.findMany({ select: { id: true, subjectId: true } }),
+    prisma.attendanceRecord.groupBy({ by: ['learnerId', 'scheduleId', 'status'], where: { learnerId: { in: learnerIds } }, _count: { _all: true } }),
+    windowStart
+      ? prisma.attendanceRecord.groupBy({
+          by: ['learnerId', 'scheduleId', 'status'],
+          where: { learnerId: { in: learnerIds }, date: { gte: parseDay(windowStart) } },
+          _count: { _all: true },
+        })
+      : [],
+    prisma.assessmentScore.findMany({
+      where: { learnerId: { in: learnerIds } },
+      select: { learnerId: true, score: true, assessment: { select: { maxScore: true, competencyId: true, competency: { select: { subjectId: true } } } } },
+    }),
+    postTestPercents({ learnerId: { in: learnerIds }, test: testWhere(settings) }),
+  ]);
+  const subjectOfSchedule = new Map(schedules.map((s) => [s.id, s.subjectId]));
+  const entry = (learnerId, subjectId) => {
+    const bySubject = out.get(learnerId) ?? new Map();
+    out.set(learnerId, bySubject);
+    const e = bySubject.get(subjectId) ?? { periods: 0, attended: 0, absent: 0, recentPeriods: 0, recentAbsent: 0, pcts: [], byCompetency: new Map() };
+    bySubject.set(subjectId, e);
+    return e;
+  };
+  for (const r of all) {
+    const e = entry(r.learnerId, subjectOfSchedule.get(r.scheduleId));
+    e.periods += r._count._all;
+    if (r.status === 'PRESENT' || r.status === 'LATE') e.attended += r._count._all;
+    if (r.status === 'ABSENT') e.absent += r._count._all;
+  }
+  for (const r of recent) {
+    const e = entry(r.learnerId, subjectOfSchedule.get(r.scheduleId));
+    e.recentPeriods += r._count._all;
+    if (r.status === 'ABSENT') e.recentAbsent += r._count._all;
+  }
+  const addScore = (learnerId, subjectId, competencyId, pct) => {
+    if (!subjectId) return;
+    const e = entry(learnerId, subjectId);
+    e.pcts.push(pct);
+    e.byCompetency.set(competencyId, [...(e.byCompetency.get(competencyId) ?? []), pct]);
+  };
+  for (const s of scores) {
+    if (s.assessment.maxScore) addScore(s.learnerId, s.assessment.competency.subjectId, s.assessment.competencyId, (s.score / s.assessment.maxScore) * 100);
+  }
+  for (const p of posts) addScore(p.learnerId, p.subjectId, p.competencyId, p.pct);
+  for (const bySubject of out.values()) {
+    for (const e of bySubject.values()) {
+      e.rate = rateOf(e.attended, e.periods);
+      e.average = e.pcts.length ? round1(avg(e.pcts)) : null;
+      e.competencyAvg = new Map([...e.byCompetency].map(([id, list]) => [id, round1(avg(list))]));
+    }
+  }
+  return out;
+}
+
 module.exports = {
   round1,
   avg,
@@ -262,5 +427,12 @@ module.exports = {
   dailySeries,
   totals,
   monthlySeries,
+  weeklySeries,
+  scorePercents,
+  distribution,
+  missedLessons,
+  subjectBreakdown,
+  recentWindowStart,
+  testWhere,
   STATUS_ORDER,
 };
